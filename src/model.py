@@ -552,6 +552,8 @@ class UniST(nn.Module):
         return decoder_pos_embed
 
     def prompt_generate(self, shape, x_period, x_closeness, x, data, pos):
+        import ipdb
+        ipdb.set_trace()
         P = x_period.shape[1]
 
         HW = x_closeness.shape[2]
@@ -727,12 +729,15 @@ class UniST(nn.Module):
 
 
     def forward(self, imgs, mask_ratio=0.5, mask_strategy='random',seed=None, data='none', mode='backward'):
-
+        import ipdb
+        ipdb.set_trace()
         imgs, imgs_mark, imgs_period = imgs
 
         imgs_period = imgs_period[:,:,self.args.his_len:]
 
         T, H, W = imgs.shape[2:]
+        import ipdb
+        ipdb.set_trace()
         latent, mask, ids_restore, input_size, TimeEmb = self.forward_encoder(imgs, imgs_mark, mask_ratio, mask_strategy, seed=seed, data=data, mode=mode)
 
         pred = self.forward_decoder(latent,  imgs_period,  imgs[:,:,:self.args.his_len].squeeze(dim=1).clone(), ids_restore, mask_strategy, TimeEmb, input_size = input_size, data=data)  # [N, L, p*p*1]
@@ -740,7 +745,7 @@ class UniST(nn.Module):
 
         # predictor projection
         pred = self.decoder_pred(pred)
-
+        
         loss1, loss2, target = self.forward_loss(imgs, pred, mask)
         
         return loss1, loss2, pred, target, mask

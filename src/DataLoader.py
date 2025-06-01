@@ -5,7 +5,8 @@ import torch
 import datetime
 import copy
 import random
-
+import pandas as pd
+import numpy as np
 class MinMaxNormalization(object):
     """
         MinMax Normalization --> [-1, 1]
@@ -38,57 +39,48 @@ class MinMaxNormalization(object):
 
 
 def data_load_single(args, dataset): 
-
-    folder_path = '../dataset/{}_{}.json'.format(dataset,args.task)
-    f = open(folder_path,'r')
-    data_all = json.load(f)
-
-    X_train = torch.tensor(data_all['X_train'][0]).unsqueeze(1)
-    X_test = torch.tensor(data_all['X_test'][0]).unsqueeze(1)
-    X_val = torch.tensor(data_all['X_val'][0]).unsqueeze(1)
-
-    X_train_period = torch.tensor(data_all['X_train'][1]).permute(0,2,1,3,4)
-    X_test_period = torch.tensor(data_all['X_test'][1]).permute(0,2,1,3,4)
-    X_val_period = torch.tensor(data_all['X_val'][1]).permute(0,2,1,3,4)
-
-    args.seq_len = X_train.shape[2]
+    X_train = torch.tensor(np.load('/home/yyf/private/Global Fire Prediction/dataset/label_non_scale_train.npy')).reshape(-1,12,20,20,2)
+    X_test = torch.tensor(np.load('/home/yyf/private/Global Fire Prediction/dataset/label_non_scale_test.npy'))[:84].reshape(-1,12,20,20,2)
+    X_val = torch.tensor(np.load('/home/yyf/private/Global Fire Prediction/dataset/label_non_scale_test.npy'))[:84].reshape(-1,12,20,20,2)
+    args.seq_len = X_train.shape[1]
     H, W = X_train.shape[3], X_train.shape[4]  
+    X_train_ts = pd.concat([pd.read_csv('/home/yyf/private/Global Fire Prediction/dataset/trainmax.csv')['date'],pd.read_csv('/home/yyf/private/Global Fire Prediction/dataset/valmax.csv')['date']])
+    X_train_ts=torch.tensor([(datetime.datetime.strptime(t,'%Y-%m-%d').weekday(),datetime.datetime.strptime(t,'%Y-%m-%d').month) for t in X_train_ts.values]).reshape(-1,12,20,20,2)
+    X_val_ts = pd.read_csv('/home/yyf/private/Global Fire Prediction/dataset/testmax.csv')['date']
+    X_val_ts = torch.tensor([(datetime.datetime.strptime(t,'%Y-%m-%d').weekday(),datetime.datetime.strptime(t,'%Y-%m-%d').month) for t in X_val_ts.values])
+    X_val_ts = X_val_ts.reshape(-1,20,20,2)
+    X_val_ts = X_val_ts[:84].reshape(-1,12,20,20,2)
+    X_test_ts = X_val_ts.clone()
+    X_train_ts = X_train_ts[:,:,0,0,:].squeeze()
+    X_val_ts = X_val_ts[:,:,0,0,:].squeeze()
+    X_test_ts = X_test_ts[:,:,0,0,:].squeeze()
 
-    if 'TaxiBJ' in dataset:
-        X_train_ts = data_all['timestamps']['train']
-        X_test_ts = data_all['timestamps']['test']
-        X_val_ts = data_all['timestamps']['val']
-
-        X_train_ts = torch.tensor([[(datetime.datetime.strptime(i,'%Y-%m-%d %H:%M:%S').weekday(),datetime.datetime.strptime(i,'%Y-%m-%d %H:%M:%S').hour*2+int(datetime.datetime.strptime(i,'%Y-%m-%d %H:%M:%S').minute>=30)) for i in t] for t in X_train_ts])
-        X_test_ts = torch.tensor([[(datetime.datetime.strptime(i,'%Y-%m-%d %H:%M:%S').weekday(),datetime.datetime.strptime(i,'%Y-%m-%d %H:%M:%S').hour*2+int(datetime.datetime.strptime(i,'%Y-%m-%d %H:%M:%S').minute>=30)) for i in t] for t in X_test_ts])
-        X_val_ts = torch.tensor([[(datetime.datetime.strptime(i,'%Y-%m-%d %H:%M:%S').weekday(),datetime.datetime.strptime(i,'%Y-%m-%d %H:%M:%S').hour*2+int(datetime.datetime.strptime(i,'%Y-%m-%d %H:%M:%S').minute>=30)) for i in t] for t in X_val_ts])
-
-    elif 'Crowd' in dataset or 'Cellular' in dataset or 'Traffic_log' in dataset:
-        X_train_ts = data_all['timestamps']['train']
-        X_test_ts = data_all['timestamps']['test']
-        X_val_ts = data_all['timestamps']['val']
-
-        X_train_ts = torch.tensor([[((i%(24*2*7)//(24*2)+2)%7,i%(24*2)) for i in t] for t in X_train_ts])
-        X_test_ts = torch.tensor([[((i%(24*2*7)//(24*2)+2)%7, i%(24*2)) for i in t] for t in X_test_ts])
-        X_val_ts = torch.tensor([[((i%(24*2*7)//(24*2)+2)%7, i%(24*2)) for i in t] for t in X_val_ts])
-
-    elif 'TaxiNYC' in dataset or 'BikeNYC' in dataset or 'TDrive' in dataset or 'Traffic' in dataset or 'DC' in dataset or 'Austin' in dataset or 'Porto' in dataset or 'CHI' in dataset or 'METR-LA' in dataset or 'CrowdBJ' in dataset:
-        X_train_ts = torch.tensor(data_all['timestamps']['train'])
-        X_test_ts = torch.tensor(data_all['timestamps']['test'])
-        X_val_ts = torch.tensor(data_all['timestamps']['val'])
-
-    my_scaler = MinMaxNormalization()
-    MAX = max(torch.max(X_train).item(), torch.max(X_test).item(), torch.max(X_val).item())
-    MIN = min(torch.min(X_train).item(), torch.min(X_test).item(), torch.min(X_val).item())
-    my_scaler.fit(np.array([MIN, MAX]))
-
-    X_train = my_scaler.transform(X_train.reshape(-1,1)).reshape(X_train.shape)
-    X_test = my_scaler.transform(X_test.reshape(-1,1)).reshape(X_test.shape)
-    X_val = my_scaler.transform(X_val.reshape(-1,1)).reshape(X_val.shape)
-    X_train_period = my_scaler.transform(X_train_period.reshape(-1,1)).reshape(X_train_period.shape)
-    X_test_period = my_scaler.transform(X_test_period.reshape(-1,1)).reshape(X_test_period.shape)
-    X_val_period = my_scaler.transform(X_val_period.reshape(-1,1)).reshape(X_val_period.shape)
-
+    my_scaler_channel_0 = MinMaxNormalization()
+    MAX_0 = max(torch.max(X_train[...,0]).item(), torch.max(X_test[...,0]).item(), torch.max(X_val[...,0]).item())
+    MIN_0 = min(torch.min(X_train[...,0]).item(), torch.min(X_test[...,0]).item(), torch.min(X_val[...,0]).item())
+    my_scaler_channel_0.fit(np.array([MIN_0, MAX_0]))
+    my_scaler_channel_1 = MinMaxNormalization()
+    MAX_1 = max(torch.max(X_train[...,1]).item(), torch.max(X_test[...,1]).item(), torch.max(X_val[...,1]).item())
+    MIN_1 = min(torch.min(X_train[...,1]).item(), torch.min(X_test[...,1]).item(), torch.min(X_val[...,1]).item())
+    my_scaler_channel_1.fit(np.array([MIN_1, MAX_1]))
+    X_train[...,0] = my_scaler_channel_0.transform(X_train[...,0].reshape(-1,1)).reshape(X_train[...,0].shape)
+    X_test[...,0] = my_scaler_channel_0.transform(X_test[...,0].reshape(-1,1)).reshape(X_test[...,0].shape)
+    X_val[...,0] = my_scaler_channel_0.transform(X_val[...,0].reshape(-1,1)).reshape(X_val[...,0].shape)
+    X_train[...,1] = my_scaler_channel_1.transform(X_train[...,1].reshape(-1,1)).reshape(X_train[...,1].shape)
+    X_test[...,1] = my_scaler_channel_1.transform(X_test[...,1].reshape(-1,1)).reshape(X_test[...,1].shape)
+    X_val[...,1] = my_scaler_channel_1.transform(X_val[...,1].reshape(-1,1)).reshape(X_val[...,1].shape)
+    X_train_period = torch.tensor(np.load("/home/yyf/private/Global Fire Prediction/dataset/static_feat_train.npy")).reshape(-1,12,20,20,26)
+    X_test_period = torch.tensor(np.load("/home/yyf/private/Global Fire Prediction/dataset/static_feat_test.npy"))[:84].reshape(-1,12,20,20,26)
+    X_val_period = torch.tensor(np.load("/home/yyf/private/Global Fire Prediction/dataset/static_feat_test.npy"))[:84].reshape(-1,12,20,20,26)
+    # X_train_period = my_scaler.transform(X_train_period.reshape(-1,1)).reshape(X_train_period.shape)
+    # X_test_period = my_scaler.transform(X_test_period.reshape(-1,1)).reshape(X_test_period.shape)
+    # X_val_period = my_scaler.transform(X_val_period.reshape(-1,1)).reshape(X_val_period.shape)
+    X_train = X_train.permute(0,4,1,2,3)
+    X_val = X_val.permute(0,4,1,2,3)
+    X_test = X_test.permute(0,4,1,2,3)
+    X_train_period = X_train_period.permute(0,4,1,2,3)
+    X_val_period = X_val_period.permute(0,4,1,2,3)
+    X_test_period = X_test_period.permute(0,4,1,2,3)
     data = [[X_train[i], X_train_ts[i], X_train_period[i]] for i in range(X_train.shape[0])]
     test_data = [[X_test[i], X_test_ts[i], X_test_period[i]] for i in range(X_test.shape[0])]
     val_data = [[X_val[i], X_val_ts[i], X_val_period[i]] for i in range(X_val.shape[0])]
@@ -102,11 +94,10 @@ def data_load_single(args, dataset):
         batch_size = args.batch_size_2
     elif H + W < 64:
         batch_size = args.batch_size_3
-
     data = th.utils.data.DataLoader(data, num_workers=4, batch_size=batch_size, shuffle=True) 
     test_data = th.utils.data.DataLoader(test_data, num_workers=4, batch_size = 4 * batch_size, shuffle=False)
     val_data = th.utils.data.DataLoader(val_data, num_workers=4, batch_size = 4 * batch_size, shuffle=False)
-
+    my_scaler=[my_scaler_channel_0,my_scaler_channel_1]
     return  data, test_data, val_data, my_scaler
 
 def data_load(args):

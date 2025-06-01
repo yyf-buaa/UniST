@@ -95,6 +95,8 @@ def main():
     setup_init(100)
 
     data, test_data, val_data, args.scaler = data_load_main(args)
+    import ipdb
+    ipdb.set_trace()
     assert args.his_len + args.pred_len == args.seq_len
 
     if args.few_ratio < 1.0:
