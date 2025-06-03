@@ -294,7 +294,7 @@ class Block(nn.Module):
 class UniST(nn.Module):
     """ Masked Autoencoder with VisionTransformer backbone
     """
-    def __init__(self, patch_size=1, in_chans=1,
+    def __init__(self, patch_size=1, in_chans=2,
                  embed_dim=512, decoder_embed_dim=512, depth=12, decoder_depth=8, num_heads=8,  decoder_num_heads=4,
                  mlp_ratio=2, norm_layer=nn.LayerNorm, t_patch_size=1,
                  no_qkv_bias=False, pos_emb = 'trivial', args=None, ):
@@ -304,10 +304,10 @@ class UniST(nn.Module):
 
         self.pos_emb = pos_emb
 
-        self.Embedding = DataEmbedding(1, embed_dim, args=args)
+        self.Embedding = DataEmbedding(2, embed_dim, args=args)
 
         #if 'TDrive' in args.dataset or 'BikeNYC2' in args.dataset:
-        self.Embedding_24 = DataEmbedding(1, embed_dim, args=args, size1=24, size2 = 7)
+        self.Embedding_24 = DataEmbedding(2, embed_dim, args=args, size1=24, size2 = 7)
 
         if args.prompt_ST != 0:
             self.st_prompt = Prompt_ST(args.num_memory_spatial, args.num_memory_temporal, embed_dim, self.args.his_len, args.conv_num, args=args)
@@ -462,8 +462,8 @@ class UniST(nn.Module):
 
     def patchify(self, imgs):
         """
-        imgs: (N, 1, T, H, W)
-        x: (N, L, patch_size**2 *1)
+        imgs: (N, 2, T, H, W)
+        x: (N, L, patch_size**2 *2)
         """
         N, _, T, H, W = imgs.shape
         p = self.args.patch_size
@@ -472,22 +472,22 @@ class UniST(nn.Module):
         h = H // p
         w = W // p
         t = T // u
-        x = imgs.reshape(shape=(N, 1, t, u, h, p, w, p))
+        x = imgs.reshape(shape=(N, 2, t, u, h, p, w, p))
         x = torch.einsum("nctuhpwq->nthwupqc", x)
-        x = x.reshape(shape=(N, t * h * w, u * p**2 * 1))
+        x = x.reshape(shape=(N, t * h * w, u * p**2 * 2))
         self.patch_info = (N, T, H, W, p, u, t, h, w)
         return x
 
-
     def unpatchify(self, imgs):
         """
-        imgs: (N, L, patch_size**2 *1)
-        x: (N, 1, T, H, W)
+        imgs: (N, L, u*p*p*2)
+        x: (N, 2, T, H, W)
         """
         N, T, H, W, p, u, t, h, w = self.patch_info
-        imgs = imgs.reshape(shape=(N, t, h, w, u, p, p))
-        imgs = torch.einsum("nthwupq->ntuhpwq", imgs)
-        imgs = imgs.reshape(shape=(N, T, H, W))
+        imgs = imgs.reshape(shape=(N, t, h, w, u, p, p, 2))
+        imgs = torch.einsum("nthwupqc->nctuhpwq", imgs) 
+        imgs = imgs.reshape(shape=(N, 2, T, H, W))
+
         return imgs
 
 
@@ -598,10 +598,12 @@ class UniST(nn.Module):
         # embed patches
         N, _, T, H, W = x.shape
 
-        if 'TDrive' in data or 'BikeNYC2' in data or 'DC' in data or 'Porto' in data or 'Ausin' in data:
-            x, TimeEmb = self.Embedding_24(x, x_mark, is_time = True)
-        elif data is not None:
-            x, TimeEmb = self.Embedding(x, x_mark, is_time = True)
+        # if 'TDrive' in data or 'BikeNYC2' in data or 'DC' in data or 'Porto' in data or 'Ausin' in data:
+        #     x, TimeEmb = self.Embedding_24(x, x_mark, is_time = True)
+        # elif data is not None:
+        import ipdb
+        ipdb.set_trace()
+        x, TimeEmb = self.Embedding(x, x_mark, is_time = True)
         _, L, C = x.shape
 
         T = T // self.args.t_patch_size
@@ -651,6 +653,8 @@ class UniST(nn.Module):
         return x_attn, mask, ids_restore, input_size, TimeEmb
 
     def forward_decoder(self, x, x_period, x_origin, ids_restore, mask_strategy, TimeEmb, input_size=None, data=None):
+        import ipdb
+        ipdb.set_trace()
         N = x.shape[0]
         T, H, W = input_size
 
@@ -711,7 +715,7 @@ class UniST(nn.Module):
     def forward_loss(self, imgs, pred, mask):
         """
         imgs: [N, 1, T, H, W]
-        pred: [N, t*h*w, u*p*p*1]
+        pred: [N, t*h*w, u*p*p*2]
         mask: [N*t, h*w], 0 is keep, 1 is remove,
         """
 
@@ -729,15 +733,11 @@ class UniST(nn.Module):
 
 
     def forward(self, imgs, mask_ratio=0.5, mask_strategy='random',seed=None, data='none', mode='backward'):
-        import ipdb
-        ipdb.set_trace()
-        imgs, imgs_mark, imgs_period = imgs
+        imgs, imgs_mark, imgs_period = imgs #imgs:[B,2,T,H,W]
 
-        imgs_period = imgs_period[:,:,self.args.his_len:]
+        #imgs_period = imgs_period[:,:,self.args.his_len:]
 
         T, H, W = imgs.shape[2:]
-        import ipdb
-        ipdb.set_trace()
         latent, mask, ids_restore, input_size, TimeEmb = self.forward_encoder(imgs, imgs_mark, mask_ratio, mask_strategy, seed=seed, data=data, mode=mode)
 
         pred = self.forward_decoder(latent,  imgs_period,  imgs[:,:,:self.args.his_len].squeeze(dim=1).clone(), ids_restore, mask_strategy, TimeEmb, input_size = input_size, data=data)  # [N, L, p*p*1]
@@ -745,7 +745,8 @@ class UniST(nn.Module):
 
         # predictor projection
         pred = self.decoder_pred(pred)
-        
+        import ipdb
+        ipdb.set_trace()
         loss1, loss2, target = self.forward_loss(imgs, pred, mask)
         
         return loss1, loss2, pred, target, mask

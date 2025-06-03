@@ -39,9 +39,9 @@ class MinMaxNormalization(object):
 
 
 def data_load_single(args, dataset): 
-    X_train = torch.tensor(np.load('/home/yyf/private/Global Fire Prediction/dataset/label_non_scale_train.npy')).reshape(-1,12,20,20,2)
-    X_test = torch.tensor(np.load('/home/yyf/private/Global Fire Prediction/dataset/label_non_scale_test.npy'))[:84].reshape(-1,12,20,20,2)
-    X_val = torch.tensor(np.load('/home/yyf/private/Global Fire Prediction/dataset/label_non_scale_test.npy'))[:84].reshape(-1,12,20,20,2)
+    X_train = torch.tensor(np.load('/home/yyf/private/Global Fire Prediction/dataset/label_non_scale_train.npy').astype(np.float32)).reshape(-1,12,20,20,2)
+    X_test = torch.tensor(np.load('/home/yyf/private/Global Fire Prediction/dataset/label_non_scale_test.npy').astype(np.float32))[:84].reshape(-1,12,20,20,2)
+    X_val = torch.tensor(np.load('/home/yyf/private/Global Fire Prediction/dataset/label_non_scale_test.npy').astype(np.float32))[:84].reshape(-1,12,20,20,2)
     args.seq_len = X_train.shape[1]
     H, W = X_train.shape[3], X_train.shape[4]  
     X_train_ts = pd.concat([pd.read_csv('/home/yyf/private/Global Fire Prediction/dataset/trainmax.csv')['date'],pd.read_csv('/home/yyf/private/Global Fire Prediction/dataset/valmax.csv')['date']])
@@ -69,9 +69,9 @@ def data_load_single(args, dataset):
     X_train[...,1] = my_scaler_channel_1.transform(X_train[...,1].reshape(-1,1)).reshape(X_train[...,1].shape)
     X_test[...,1] = my_scaler_channel_1.transform(X_test[...,1].reshape(-1,1)).reshape(X_test[...,1].shape)
     X_val[...,1] = my_scaler_channel_1.transform(X_val[...,1].reshape(-1,1)).reshape(X_val[...,1].shape)
-    X_train_period = torch.tensor(np.load("/home/yyf/private/Global Fire Prediction/dataset/static_feat_train.npy")).reshape(-1,12,20,20,26)
-    X_test_period = torch.tensor(np.load("/home/yyf/private/Global Fire Prediction/dataset/static_feat_test.npy"))[:84].reshape(-1,12,20,20,26)
-    X_val_period = torch.tensor(np.load("/home/yyf/private/Global Fire Prediction/dataset/static_feat_test.npy"))[:84].reshape(-1,12,20,20,26)
+    X_train_period = torch.tensor(np.load("/home/yyf/private/Global Fire Prediction/dataset/static_feat_train.npy").astype(np.float32)).reshape(-1,12,20,20,26)
+    X_test_period = torch.tensor(np.load("/home/yyf/private/Global Fire Prediction/dataset/static_feat_test.npy").astype(np.float32))[:84].reshape(-1,12,20,20,26)
+    X_val_period = torch.tensor(np.load("/home/yyf/private/Global Fire Prediction/dataset/static_feat_test.npy").astype(np.float32))[:84].reshape(-1,12,20,20,26)
     # X_train_period = my_scaler.transform(X_train_period.reshape(-1,1)).reshape(X_train_period.shape)
     # X_test_period = my_scaler.transform(X_test_period.reshape(-1,1)).reshape(X_test_period.shape)
     # X_val_period = my_scaler.transform(X_val_period.reshape(-1,1)).reshape(X_val_period.shape)

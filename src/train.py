@@ -161,7 +161,8 @@ class TrainLoop:
 
     def run_loop(self):
         step = 0
-
+        import ipdb
+        ipdb.set_trace()
         if self.args.mode == 'testing':
             self.Evaluation(self.val_data, 0, best=True, Type='val')
             exit()

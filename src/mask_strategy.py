@@ -153,8 +153,6 @@ def random_masking_evaluate(x, mask_ratio):
     Per-sample shuffling is done by argsort random noise.
     x: [N, L, D], sequence
     """
-    import ipdb
-    ipdb.set_trace()
     N, L, D = x.shape  # batch, length, dim
     len_keep = int(L * (1 - mask_ratio))
 
