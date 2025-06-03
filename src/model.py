@@ -714,7 +714,7 @@ class UniST(nn.Module):
 
     def forward_loss(self, imgs, pred, mask):
         """
-        imgs: [N, 1, T, H, W]
+        imgs: [N, 2, T, H, W]
         pred: [N, t*h*w, u*p*p*2]
         mask: [N*t, h*w], 0 is keep, 1 is remove,
         """
