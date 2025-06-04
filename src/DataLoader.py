@@ -37,20 +37,53 @@ class MinMaxNormalization(object):
         return X
 
 
+import torch
+
+def sliding_window(tensor, seq_len):
+    """
+    Apply sliding window on the first dimension (T) of the tensor.
+    
+    Parameters:
+    - tensor: Input tensor of shape (T, N, M, 2)
+    - seq_len: The length of each sliding window sequence
+    
+    Returns:
+    - Tensor of shape (B, seq_len, N, M, 2), where B is the number of windows
+    """
+    T, N, M, C = tensor.shape
+    # Calculate the number of windows
+    B = T - seq_len + 1
+    
+    # Check if there are enough elements for at least one window
+    if B < 1:
+        raise ValueError("The sequence length is too long for the given tensor.")
+    
+    # Prepare indices for gathering slices
+    indices = torch.arange(seq_len).reshape(1, seq_len).repeat(B, 1)
+    offsets = torch.arange(B).reshape(B, 1)
+    indices = indices + offsets
+    
+    # Use advanced indexing to gather the sliding windows
+    output = tensor[indices]
+    
+    return output.reshape(B, seq_len, N, M, C)
 
 def data_load_single(args, dataset): 
     X_train = torch.tensor(np.load('/home/yyf/private/Global Fire Prediction/dataset/label_non_scale_train.npy').astype(np.float32)).reshape(-1,12,20,20,2)
-    X_test = torch.tensor(np.load('/home/yyf/private/Global Fire Prediction/dataset/label_non_scale_test.npy').astype(np.float32))[:84].reshape(-1,12,20,20,2)
-    X_val = torch.tensor(np.load('/home/yyf/private/Global Fire Prediction/dataset/label_non_scale_test.npy').astype(np.float32))[:84].reshape(-1,12,20,20,2)
+    X_test = torch.tensor(np.load('/home/yyf/private/Global Fire Prediction/dataset/label_non_scale_test.npy').astype(np.float32)).reshape(-1,20,20,2)
+    X_val = torch.tensor(np.load('/home/yyf/private/Global Fire Prediction/dataset/label_non_scale_test.npy').astype(np.float32)).reshape(-1,20,20,2)
     args.seq_len = X_train.shape[1]
     H, W = X_train.shape[3], X_train.shape[4]  
+    X_test = sliding_window(X_test,args.seq_len) 
+    X_val = sliding_window(X_val,args.seq_len) 
     X_train_ts = pd.concat([pd.read_csv('/home/yyf/private/Global Fire Prediction/dataset/trainmax.csv')['date'],pd.read_csv('/home/yyf/private/Global Fire Prediction/dataset/valmax.csv')['date']])
     X_train_ts=torch.tensor([(datetime.datetime.strptime(t,'%Y-%m-%d').weekday(),datetime.datetime.strptime(t,'%Y-%m-%d').month) for t in X_train_ts.values]).reshape(-1,12,20,20,2)
     X_val_ts = pd.read_csv('/home/yyf/private/Global Fire Prediction/dataset/testmax.csv')['date']
     X_val_ts = torch.tensor([(datetime.datetime.strptime(t,'%Y-%m-%d').weekday(),datetime.datetime.strptime(t,'%Y-%m-%d').month) for t in X_val_ts.values])
     X_val_ts = X_val_ts.reshape(-1,20,20,2)
-    X_val_ts = X_val_ts[:84].reshape(-1,12,20,20,2)
     X_test_ts = X_val_ts.clone()
+    X_test_ts = sliding_window(X_test_ts,args.seq_len) 
+    X_val_ts = sliding_window(X_val_ts,args.seq_len) 
     X_train_ts = X_train_ts[:,:,0,0,:].squeeze()
     X_val_ts = X_val_ts[:,:,0,0,:].squeeze()
     X_test_ts = X_test_ts[:,:,0,0,:].squeeze()
@@ -70,11 +103,10 @@ def data_load_single(args, dataset):
     X_test[...,1] = my_scaler_channel_1.transform(X_test[...,1].reshape(-1,1)).reshape(X_test[...,1].shape)
     X_val[...,1] = my_scaler_channel_1.transform(X_val[...,1].reshape(-1,1)).reshape(X_val[...,1].shape)
     X_train_period = torch.tensor(np.load("/home/yyf/private/Global Fire Prediction/dataset/static_feat_train.npy").astype(np.float32)).reshape(-1,12,20,20,26)
-    X_test_period = torch.tensor(np.load("/home/yyf/private/Global Fire Prediction/dataset/static_feat_test.npy").astype(np.float32))[:84].reshape(-1,12,20,20,26)
-    X_val_period = torch.tensor(np.load("/home/yyf/private/Global Fire Prediction/dataset/static_feat_test.npy").astype(np.float32))[:84].reshape(-1,12,20,20,26)
-    # X_train_period = my_scaler.transform(X_train_period.reshape(-1,1)).reshape(X_train_period.shape)
-    # X_test_period = my_scaler.transform(X_test_period.reshape(-1,1)).reshape(X_test_period.shape)
-    # X_val_period = my_scaler.transform(X_val_period.reshape(-1,1)).reshape(X_val_period.shape)
+    X_test_period = torch.tensor(np.load("/home/yyf/private/Global Fire Prediction/dataset/static_feat_test.npy").astype(np.float32)).reshape(-1,20,20,26)
+    X_val_period = torch.tensor(np.load("/home/yyf/private/Global Fire Prediction/dataset/static_feat_test.npy").astype(np.float32)).reshape(-1,20,20,26)
+    X_test_period = sliding_window(X_test_period,args.seq_len) 
+    X_val_period = sliding_window(X_val_period,args.seq_len) 
     X_train = X_train.permute(0,4,1,2,3)
     X_val = X_val.permute(0,4,1,2,3)
     X_test = X_test.permute(0,4,1,2,3)

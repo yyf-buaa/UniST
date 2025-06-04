@@ -40,32 +40,20 @@ class TrainLoop:
         return loss, num, loss_real, num2
 
     def Sample(self, test_data, step, mask_ratio, mask_strategy, seed=None, dataset='', index=0, Type='val'):
-        
+        target_list = []
         with torch.no_grad():
-            error_mae, error_norm, error, num, error2, num2 = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-            
+            error_ch1, error_ch2, error_mae_ch1, error_mae_ch2, error_norm, num = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+
             for _, batch in enumerate(test_data[index]):
                 
                 loss, _, pred, target, mask = self.model_forward(batch, self.model, mask_ratio, mask_strategy, seed=seed, data = dataset, mode='forward')
 
                 pred = torch.clamp(pred, min=-1, max=1)
-                # #pred,target:[N, t*h*w, u*p*p*1]
-                # pred_mask = pred.squeeze(dim=2)
-                # target_mask = target.squeeze(dim=2)
-
-                # error += mean_squared_error(self.args.scaler[dataset].inverse_transform(pred_mask[mask==1].reshape(-1,1).detach().cpu().numpy()), self.args.scaler[dataset].inverse_transform(target_mask[mask==1].reshape(-1,1).detach().cpu().numpy()), squared=True) * mask.sum().item()
-                # error_mae += mean_absolute_error(self.args.scaler[dataset].inverse_transform(pred_mask[mask==1].reshape(-1,1).detach().cpu().numpy()), self.args.scaler[dataset].inverse_transform(target_mask[mask==1].reshape(-1,1).detach().cpu().numpy())) * mask.sum().item()
-                # error_norm += loss.item() * mask.sum().item()
-                # num += mask.sum().item()
-                # num2 += (1-mask).sum().item()
-                # Split the two channels
                 pred_ch1 = pred[..., ::2] 
                 pred_ch2 = pred[..., 1::2] 
 
                 target_ch1 = target[..., ::2]
                 target_ch2 = target[..., 1::2]
-
-                mask_flat = mask.view(-1).bool().cpu().numpy()
 
                 pred_mask_ch1 = pred_ch1[mask == 1].reshape(-1, 1).detach().cpu().numpy()
                 pred_mask_ch2 = pred_ch2[mask == 1].reshape(-1, 1).detach().cpu().numpy()
@@ -73,6 +61,7 @@ class TrainLoop:
                 target_mask_ch1 = target_ch1[mask == 1].reshape(-1, 1).detach().cpu().numpy()
                 target_mask_ch2 = target_ch2[mask == 1].reshape(-1, 1).detach().cpu().numpy()
 
+                
                 scaler1 = self.args.scaler[dataset][0]  # 第一个通道的 scaler
                 scaler2 = self.args.scaler[dataset][1]  # 第二个通道的 scaler
 
@@ -81,7 +70,19 @@ class TrainLoop:
 
                 pred_inv_ch2 = scaler2.inverse_transform(pred_mask_ch2)
                 target_inv_ch2 = scaler2.inverse_transform(target_mask_ch2)
+                target_list.append(target_inv_ch1)
+                target_list.append(target_inv_ch2)
+                # #筛选大于 0.001 的样本
+                # mask_1 = (target_inv_ch1 > 0.001).flatten()
+                # pred_inv_ch1 = pred_inv_ch1[mask_1]
+                # target_inv_ch1 = target_inv_ch1[mask_1]
 
+                # mask_2 = (target_inv_ch2 > 0.001).flatten()
+                # pred_inv_ch2 = pred_inv_ch2[mask_2]
+                # target_inv_ch2 = target_inv_ch2[mask_2]
+
+
+                
                 error_ch1 += mean_squared_error(target_inv_ch1, pred_inv_ch1, squared=True) * mask.sum().item()
                 error_mae_ch1 += mean_absolute_error(target_inv_ch1, pred_inv_ch1) * mask.sum().item()
 
@@ -90,17 +91,26 @@ class TrainLoop:
 
                 error_norm += loss.item() * mask.sum().item()
                 num += mask.sum().item()
-                num2 += (1 - mask).sum().item()
 
-        rmse = np.sqrt(error / num)
-        mae = error_mae / num
+        rmse_ch1 = np.sqrt(error_ch1 / num)
+        rmse_ch2 = np.sqrt(error_ch2 / num)
+        mae_ch1 = error_mae_ch1 / num
+        mae_ch2 = error_mae_ch2 / num
         loss_test = error_norm / num
-
-        return rmse, mae, loss_test
+        if Type == 'test':
+            import ipdb
+            ipdb.set_trace()
+        return (rmse_ch1, rmse_ch2), (mae_ch1, mae_ch2), loss_test
 
 
     def Evaluation(self, test_data, epoch, seed=None, best=True, Type='val'):
-        
+        old_mask_strategy_random = self.args.mask_strategy_random
+        old_mask_strategy = self.args.mask_strategy
+        old_mask_ratio = self.args.mask_ratio
+        if Type == 'test':
+            self.args.mask_strategy_random = 'none'
+            self.args.mask_strategy = 'temporal'
+            self.args.mask_ratio = (self.args.pred_len+0.0) / (self.args.pred_len+self.args.his_len)
         loss_list = []
 
         rmse_list = []
@@ -121,10 +131,13 @@ class TrainLoop:
                         rmse_key_result[dataset_name][s][m] = result
                         
                         if Type == 'val':
-                            self.writer.add_scalar('Evaluation/{}-{}-{}'.format(dataset_name.split('_C')[0], s, m), result, epoch)
+                            self.writer.add_scalar('Evaluation_RMSE/{}-{}-{}-prob'.format(dataset_name.split('_C')[0], s, m), result[0], epoch)
+                            self.writer.add_scalar('Evaluation_RMSE/{}-{}-{}-brightness'.format(dataset_name.split('_C')[0], s, m), result[1], epoch)
                         elif Type == 'test':
-                            self.writer.add_scalar('Test_RMSE/{}-{}-{}'.format(dataset_name.split('_C')[0], s, m), result, epoch)
-                            self.writer.add_scalar('Test_MAE/MAE-{}-{}-{}'.format(dataset_name.split('_C')[0], s, m), mae, epoch)
+                            self.writer.add_scalar('Test_RMSE/{}-{}-{}-prob'.format(dataset_name.split('_C')[0], s, m), result[0], epoch)
+                            self.writer.add_scalar('Test_RMSE/{}-{}-{}-brightness'.format(dataset_name.split('_C')[0], s, m), result[1], epoch)
+                            self.writer.add_scalar('Test_MAE/MAE-{}-{}-{}-prob'.format(dataset_name.split('_C')[0], s, m), mae[0], epoch)
+                            self.writer.add_scalar('Test_MAE/MAE-{}-{}-{}-brightness'.format(dataset_name.split('_C')[0], s, m), mae[1], epoch)
 
             else:
                 s = self.args.mask_strategy
@@ -137,14 +150,19 @@ class TrainLoop:
                 rmse_key_result[dataset_name][s][m] = {'rmse':result, 'mae':mae}
                 
                 if Type == 'val':
-                    self.writer.add_scalar('Evaluation/{}-{}-{}'.format(dataset_name.split('_C')[0], s, m), result, epoch)
+                    self.writer.add_scalar('Evaluation/{}-{}-{}-prob'.format(dataset_name.split('_C')[0], s, m), result[0], epoch)
+                    self.writer.add_scalar('Evaluation/{}-{}-{}-brightness'.format(dataset_name.split('_C')[0], s, m), result[1], epoch)
                 elif Type == 'test':
-                    self.writer.add_scalar('Test_RMSE/Stage-{}-{}-{}-{}'.format(self.args.stage, dataset_name.split('_C')[0], s, m), result, epoch)
-                    self.writer.add_scalar('Test_MAE/Stage-MAE-{}-{}-{}-{}'.format(self.args.stage, dataset_name.split('_C')[0], s, m), mae, epoch)
-                    
+                    self.writer.add_scalar('Test_RMSE/Stage-{}-{}-{}-{}-prob'.format(self.args.stage, dataset_name.split('_C')[0], s, m), result[0], epoch)
+                    self.writer.add_scalar('Test_RMSE/Stage-{}-{}-{}-{}-brightness'.format(self.args.stage, dataset_name.split('_C')[0], s, m), result[1], epoch)
+                    self.writer.add_scalar('Test_MAE/Stage-MAE-{}-{}-{}-{}-prob'.format(self.args.stage, dataset_name.split('_C')[0], s, m), mae[0], epoch)
+                    self.writer.add_scalar('Test_MAE/Stage-MAE-{}-{}-{}-{}-brightness'.format(self.args.stage, dataset_name.split('_C')[0], s, m), mae[1], epoch)
         
         loss_test = np.mean(loss_list)
-
+        if Type == 'test':
+            self.args.mask_strategy_random = old_mask_strategy_random 
+            self.args.mask_strategy = old_mask_strategy
+            self.args.mask_ratio = old_mask_ratio
         if best:
             is_break = self.best_model_save(epoch, loss_test, rmse_key_result)
             return is_break
@@ -194,8 +212,6 @@ class TrainLoop:
 
     def run_loop(self):
         step = 0
-        import ipdb
-        ipdb.set_trace()
         if self.args.mode == 'testing':
             self.Evaluation(self.val_data, 0, best=True, Type='val')
             exit()
@@ -214,13 +230,13 @@ class TrainLoop:
                 loss, num, loss_real, num2  = self.run_step(batch, step, mask_ratio=mask_ratio, mask_strategy = mask_strategy,index=0, name = name)
                 step += 1
                 loss_all += loss * num
-                loss_real_all += loss_real * num
+                #loss_real_all += loss_real * num
                 num_all += num
                 num_all2 += num2
             
             end = time.time()
             print('training time:{} min'.format(round((end-start)/60.0,2)))
-            print('epoch:{}, training loss:{}, training rmse:{}'.format(epoch, loss_all / num_all,np.sqrt(loss_real_all / num_all)))
+            print('epoch:{}, training loss:{}'.format(epoch, loss_all / num_all))
 
             if epoch % self.log_interval == 0 and epoch > 0 or epoch == 10 or epoch == self.args.total_epoches-1:
                 print('Evaluation')
@@ -258,12 +274,12 @@ class TrainLoop:
 
         pred_mask = pred.squeeze(dim=2)[mask==1]
         target_mask = target.squeeze(dim=2)[mask==1]
-        loss_real = mean_squared_error(self.args.scaler[name].inverse_transform(pred_mask.reshape(-1,1).detach().cpu().numpy()), self.args.scaler[name].inverse_transform(target_mask.reshape(-1,1).detach().cpu().numpy()), squared=True)
+        #loss_real = mean_squared_error(self.args.scaler[name].inverse_transform(pred_mask.reshape(-1,1).detach().cpu().numpy()), self.args.scaler[name].inverse_transform(target_mask.reshape(-1,1).detach().cpu().numpy()), squared=True)
     
         loss.backward()
 
-        self.writer.add_scalar('Training/Loss_step', np.sqrt(loss_real), step)
-        return loss.item(), mask.sum().item(), loss_real, (1-mask).sum().item()
+        self.writer.add_scalar('Training/Loss_step', loss, step)
+        return loss.item(), mask.sum().item(), None, (1-mask).sum().item()
 
     def _anneal_lr(self):
         if self.step < self.warmup_steps:

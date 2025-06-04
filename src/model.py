@@ -304,10 +304,10 @@ class UniST(nn.Module):
 
         self.pos_emb = pos_emb
 
-        self.Embedding = DataEmbedding(2, embed_dim, args=args)
+        self.Embedding = DataEmbedding(2, self.args.feat_in, embed_dim, args=args)
 
         #if 'TDrive' in args.dataset or 'BikeNYC2' in args.dataset:
-        self.Embedding_24 = DataEmbedding(2, embed_dim, args=args, size1=24, size2 = 7)
+        self.Embedding_24 = DataEmbedding(2, self.args.feat_in, embed_dim, args=args, size1=24, size2 = 7)
 
         if args.prompt_ST != 0:
             self.st_prompt = Prompt_ST(args.num_memory_spatial, args.num_memory_temporal, embed_dim, self.args.his_len, args.conv_num, args=args)
@@ -552,8 +552,6 @@ class UniST(nn.Module):
         return decoder_pos_embed
 
     def prompt_generate(self, shape, x_period, x_closeness, x, data, pos):
-        import ipdb
-        ipdb.set_trace()
         P = x_period.shape[1]
 
         HW = x_closeness.shape[2]
@@ -594,16 +592,14 @@ class UniST(nn.Module):
         return dict(tc = prompt_c, tp = prompt_p, s = out_s, loss = t_loss + s_loss)
 
 
-    def forward_encoder(self, x, x_mark, mask_ratio, mask_strategy, seed=None, data=None, mode='backward'):
+    def forward_encoder(self, x, x_mark, x_feat,  mask_ratio, mask_strategy, seed=None, data=None, mode='backward'):
         # embed patches
         N, _, T, H, W = x.shape
 
         # if 'TDrive' in data or 'BikeNYC2' in data or 'DC' in data or 'Porto' in data or 'Ausin' in data:
         #     x, TimeEmb = self.Embedding_24(x, x_mark, is_time = True)
         # elif data is not None:
-        import ipdb
-        ipdb.set_trace()
-        x, TimeEmb = self.Embedding(x, x_mark, is_time = True)
+        x, TimeEmb, FeatEmb = self.Embedding(x, x_mark, x_feat, is_time = True)
         _, L, C = x.shape
 
         T = T // self.args.t_patch_size
@@ -650,11 +646,9 @@ class UniST(nn.Module):
 
         x_attn = self.norm(x_attn)
 
-        return x_attn, mask, ids_restore, input_size, TimeEmb
+        return x_attn, mask, ids_restore, input_size, TimeEmb, FeatEmb
 
-    def forward_decoder(self, x, x_period, x_origin, ids_restore, mask_strategy, TimeEmb, input_size=None, data=None):
-        import ipdb
-        ipdb.set_trace()
+    def forward_decoder(self, x, x_period, x_origin, ids_restore, mask_strategy, TimeEmb, FeatEmb, input_size=None, data=None):
         N = x.shape[0]
         T, H, W = input_size
 
@@ -674,9 +668,9 @@ class UniST(nn.Module):
         decoder_pos_embed = self.pos_embed_dec(ids_restore, N, input_size)
 
         # add pos embed
-        assert x.shape == decoder_pos_embed.shape == TimeEmb.shape
+        assert x.shape == decoder_pos_embed.shape == TimeEmb.shape==FeatEmb.shape
 
-        x_attn = x + decoder_pos_embed + TimeEmb
+        x_attn = x + decoder_pos_embed + TimeEmb + FeatEmb
 
         if self.args.prompt_ST == 1:
 
@@ -738,15 +732,13 @@ class UniST(nn.Module):
         #imgs_period = imgs_period[:,:,self.args.his_len:]
 
         T, H, W = imgs.shape[2:]
-        latent, mask, ids_restore, input_size, TimeEmb = self.forward_encoder(imgs, imgs_mark, mask_ratio, mask_strategy, seed=seed, data=data, mode=mode)
+        latent, mask, ids_restore, input_size, TimeEmb, FeatEmb = self.forward_encoder(imgs, imgs_mark, imgs_period, mask_ratio, mask_strategy, seed=seed, data=data, mode=mode)
 
-        pred = self.forward_decoder(latent,  imgs_period,  imgs[:,:,:self.args.his_len].squeeze(dim=1).clone(), ids_restore, mask_strategy, TimeEmb, input_size = input_size, data=data)  # [N, L, p*p*1]
+        pred = self.forward_decoder(latent,  imgs_period,  imgs[:,:,:self.args.his_len].squeeze(dim=1).clone(), ids_restore, mask_strategy, TimeEmb, FeatEmb, input_size = input_size, data=data)  # [N, L, p*p*1]
         L = pred.shape[1]
 
         # predictor projection
         pred = self.decoder_pred(pred)
-        import ipdb
-        ipdb.set_trace()
         loss1, loss2, target = self.forward_loss(imgs, pred, mask)
         
         return loss1, loss2, pred, target, mask

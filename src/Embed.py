@@ -66,29 +66,31 @@ class TemporalEmbedding(nn.Module):
 
 
 class DataEmbedding(nn.Module):
-    def __init__(self, c_in, d_model, dropout=0.1, args=None, size1 = 48, size2=7 ):
+    def __init__(self, c_in, feat_in, d_model, dropout=0.1, args=None, size1 = 48, size2=7):
         super(DataEmbedding, self).__init__()
         self.args = args
+        self.feat_embedding = TokenEmbedding(c_in=feat_in, d_model=d_model, t_patch_size = args.t_patch_size,  patch_size=args.patch_size)
         self.value_embedding = TokenEmbedding(c_in=c_in, d_model=d_model, t_patch_size = args.t_patch_size,  patch_size=args.patch_size)
         self.temporal_embedding = TemporalEmbedding(t_patch_size = args.t_patch_size, d_model=d_model, hour_size  = size1, weekday_size = size2) 
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, x, x_mark, is_time=1):
+    def forward(self, x, x_mark, x_feat, is_time=1):
         '''
         x: N, T, C, H, W
         x_mark: N, T, D
         '''
         N, T, C, H, W = x.shape
         TokenEmb = self.value_embedding(x)
+        FeatEmb = self.feat_embedding(x_feat)
         TimeEmb = self.temporal_embedding(x_mark)
         assert TokenEmb.shape[1] == TimeEmb.shape[1] * H // self.args.patch_size * W // self.args.patch_size
         TimeEmb = torch.repeat_interleave(TimeEmb, TokenEmb.shape[1]//TimeEmb.shape[1], dim=1)
         assert TokenEmb.shape == TimeEmb.shape
         if is_time==1:
-            x = TokenEmb + TimeEmb
+            x = TokenEmb + TimeEmb + FeatEmb
         else:
             x = TokenEmb
-        return self.dropout(x), TimeEmb
+        return self.dropout(x), TimeEmb, FeatEmb
 
 
 # --------------------------------------------------------
