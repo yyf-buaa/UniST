@@ -45,52 +45,64 @@ class SpatialPatchEmb(nn.Module):
 
 
 class TemporalEmbedding(nn.Module):
-    def __init__(self, d_model, t_patch_size = 1, hour_size=48, weekday_size = 7):
+    def __init__(self, d_model, t_patch_size=1, hour_size=48, weekday_size=7, month_size=12, day_size=31, quarter_size=4):
         super(TemporalEmbedding, self).__init__()
-
-        hour_size = hour_size
-        weekday_size = weekday_size
-
-        self.hour_embed = nn.Embedding(hour_size, d_model)
+        
+        # 定义各个时间特征的 embedding 层
         self.weekday_embed = nn.Embedding(weekday_size, d_model)
+        self.month_embed = nn.Embedding(month_size, d_model)
+        self.day_embed = nn.Embedding(day_size, d_model)
+        self.quarter_embed = nn.Embedding(quarter_size, d_model)
+        
+        # 时间卷积层
         self.timeconv = nn.Conv1d(in_channels=d_model, out_channels=d_model, kernel_size=t_patch_size, stride=t_patch_size)
 
     def forward(self, x):
-
-        x = x.long()
-        hour_x = self.hour_embed(x[:,:,1])
-        weekday_x = self.weekday_embed(x[:,:,0])
-        timeemb = self.timeconv(hour_x.transpose(1,2)+weekday_x.transpose(1,2)).transpose(1,2)
-
-        return timeemb
-
+        """
+        :param x: 输入张量，形状为 (batch_size, seq_len, num_features)，其中 num_features 包含 [weekday, hour, month, day, year, quarter]
+        :return: 经过时间嵌入和卷积后的时间嵌入张量
+        """
+        batch_size, seq_len, _ = x.shape
+        
+        # 对每个时间特征进行嵌入
+        weekday_x = self.weekday_embed(x[:, :, 0])  # 星期几
+        month_x = self.month_embed(x[:, :, 1])      # 月份
+        day_x = self.day_embed(x[:, :, 2])          # 天
+        quarter_x = self.quarter_embed(x[:, :, 4])  # 季度
+        
+        # 合并所有时间嵌入（沿最后一个维度求和）
+        time_emb = weekday_x + month_x + day_x + quarter_x
+        # 使用卷积层进一步处理时间嵌入
+        time_emb = self.timeconv(time_emb.transpose(1, 2)).transpose(1, 2)
+        
+        return time_emb
 
 class DataEmbedding(nn.Module):
     def __init__(self, c_in, feat_in, d_model, dropout=0.1, args=None, size1 = 48, size2=7):
         super(DataEmbedding, self).__init__()
         self.args = args
-        self.feat_embedding = TokenEmbedding(c_in=feat_in, d_model=d_model, t_patch_size = args.t_patch_size,  patch_size=args.patch_size)
+        # self.feat_embedding = TokenEmbedding(c_in=feat_in, d_model=d_model, t_patch_size = args.t_patch_size,  patch_size=args.patch_size)
         self.value_embedding = TokenEmbedding(c_in=c_in, d_model=d_model, t_patch_size = args.t_patch_size,  patch_size=args.patch_size)
         self.temporal_embedding = TemporalEmbedding(t_patch_size = args.t_patch_size, d_model=d_model, hour_size  = size1, weekday_size = size2) 
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, x, x_mark, x_feat, is_time=1):
+    def forward(self, x, x_mark, is_time=1):
         '''
         x: N, T, C, H, W
         x_mark: N, T, D
         '''
         N, T, C, H, W = x.shape
         TokenEmb = self.value_embedding(x)
-        FeatEmb = self.feat_embedding(x_feat)
+        #FeatEmb = self.feat_embedding(x_feat)
         TimeEmb = self.temporal_embedding(x_mark)
         assert TokenEmb.shape[1] == TimeEmb.shape[1] * H // self.args.patch_size * W // self.args.patch_size
         TimeEmb = torch.repeat_interleave(TimeEmb, TokenEmb.shape[1]//TimeEmb.shape[1], dim=1)
         assert TokenEmb.shape == TimeEmb.shape
         if is_time==1:
-            x = TokenEmb + TimeEmb + FeatEmb
+            x = TokenEmb + TimeEmb
         else:
             x = TokenEmb
-        return self.dropout(x), TimeEmb, FeatEmb
+        return self.dropout(x), TimeEmb
 
 
 # --------------------------------------------------------

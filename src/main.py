@@ -42,8 +42,9 @@ def create_argparser():
         used_data = '',
         process_name = 'process_name',
         prompt_ST = 0,
-        his_len = 6,
-        pred_len = 6,
+        his_len = 7,
+        pred_len = 1,
+        seq_len = 8, # his_len + pred_len
         few_ratio = 0.5,
         stage = 0,
 

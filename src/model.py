@@ -434,8 +434,10 @@ class UniST(nn.Module):
         torch.nn.init.trunc_normal_(self.decoder_pos_embed_spatial, std=0.02)
         torch.nn.init.trunc_normal_(self.decoder_pos_embed_temporal, std=0.02)
 
-        torch.nn.init.trunc_normal_(self.Embedding.temporal_embedding.hour_embed.weight.data, std=0.02)
         torch.nn.init.trunc_normal_(self.Embedding.temporal_embedding.weekday_embed.weight.data, std=0.02)
+        torch.nn.init.trunc_normal_(self.Embedding.temporal_embedding.month_embed.weight.data, std=0.02)
+        torch.nn.init.trunc_normal_(self.Embedding.temporal_embedding.day_embed.weight.data, std=0.02)
+        torch.nn.init.trunc_normal_(self.Embedding.temporal_embedding.quarter_embed.weight.data, std=0.02)
 
         w = self.Embedding.value_embedding.tokenConv.weight.data
 
@@ -592,14 +594,14 @@ class UniST(nn.Module):
         return dict(tc = prompt_c, tp = prompt_p, s = out_s, loss = t_loss + s_loss)
 
 
-    def forward_encoder(self, x, x_mark, x_feat,  mask_ratio, mask_strategy, seed=None, data=None, mode='backward'):
+    def forward_encoder(self, x, x_mark,  mask_ratio, mask_strategy, seed=None, data=None, mode='backward'):
         # embed patches
         N, _, T, H, W = x.shape
 
         # if 'TDrive' in data or 'BikeNYC2' in data or 'DC' in data or 'Porto' in data or 'Ausin' in data:
         #     x, TimeEmb = self.Embedding_24(x, x_mark, is_time = True)
         # elif data is not None:
-        x, TimeEmb, FeatEmb = self.Embedding(x, x_mark, x_feat, is_time = True)
+        x, TimeEmb = self.Embedding(x, x_mark , is_time = True)
         _, L, C = x.shape
 
         T = T // self.args.t_patch_size
@@ -646,9 +648,9 @@ class UniST(nn.Module):
 
         x_attn = self.norm(x_attn)
 
-        return x_attn, mask, ids_restore, input_size, TimeEmb, FeatEmb
+        return x_attn, mask, ids_restore, input_size, TimeEmb
 
-    def forward_decoder(self, x, x_period, x_origin, ids_restore, mask_strategy, TimeEmb, FeatEmb, input_size=None, data=None):
+    def forward_decoder(self, x, x_period, x_origin, ids_restore, mask_strategy, TimeEmb, input_size=None, data=None):
         N = x.shape[0]
         T, H, W = input_size
 
@@ -667,10 +669,7 @@ class UniST(nn.Module):
 
         decoder_pos_embed = self.pos_embed_dec(ids_restore, N, input_size)
 
-        # add pos embed
-        assert x.shape == decoder_pos_embed.shape == TimeEmb.shape==FeatEmb.shape
-
-        x_attn = x + decoder_pos_embed + TimeEmb + FeatEmb
+        x_attn = x + decoder_pos_embed + TimeEmb
 
         if self.args.prompt_ST == 1:
 
@@ -706,35 +705,60 @@ class UniST(nn.Module):
 
         return x_attn
 
+
     def forward_loss(self, imgs, pred, mask):
         """
-        imgs: [N, 2, T, H, W]
-        pred: [N, t*h*w, u*p*p*2]
-        mask: [N*t, h*w], 0 is keep, 1 is remove,
+        imgs: [N, C, H, W]
+        pred: [N, L, pCpHpW], patchified prediction
+        mask: [N, L], 1 表示被遮蔽的 patch
         """
-
         target = self.patchify(imgs)
+        assert pred.shape == target.shape, f"Shape mismatch: {pred.shape} vs {target.shape}"
 
-        assert pred.shape == target.shape
+        # MSE Loss per channel
+        loss = (pred - target) ** 2  # shape: [N, L, pCpHpW]
 
-        loss = (pred - target) ** 2
-        loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
-        mask = mask.view(loss.shape)
+        # Step 1: 提取被遮蔽区域
+        mask_expanded = mask.unsqueeze(-1).expand_as(loss)  # 扩展为 [N, L, pCpHpW] 方便索引
+        masked_loss = loss[mask_expanded.bool()]             # 只保留被遮蔽的 loss 值
+        masked_target = target[mask_expanded.bool()]         # 只保留被遮蔽的 target 值
 
-        loss1 = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
-        loss2 = (loss * (1-mask)).sum() / (1-mask).sum()
-        return loss1, loss2, target
+        # Step 2: 构建 valid/invalid mask（只在被遮蔽区域内）
+        valid_mask_in_masked = (masked_target > -1)          # shape: [M], M 是被遮蔽位置的总元素数
+        invalid_mask_in_masked = ~valid_mask_in_masked
+
+        # Step 3: 统计数量
+        valid_count = valid_mask_in_masked.sum().float()
+        invalid_count = invalid_mask_in_masked.sum().float()
+
+        total_count = (valid_count + invalid_count).clamp(min=1e-8)
+
+        # Step 4: 动态权重（反比于样本数量）
+        weight_valid = (invalid_count / total_count).item() if total_count > 0 else 0.5
+        weight_invalid = (valid_count / total_count).item() if total_count > 0 else 0.5
+
+        # Step 5: 加权 loss
+        loss_valid = (masked_loss[valid_mask_in_masked]).sum() * weight_valid
+        loss_invalid = (masked_loss[invalid_mask_in_masked]).sum() * weight_invalid
+
+        # Step 6: 总 loss
+        total_loss = (loss_valid + loss_invalid) / total_count
+
+        return total_loss, target
 
 
     def forward(self, imgs, mask_ratio=0.5, mask_strategy='random',seed=None, data='none', mode='backward'):
-        imgs, imgs_mark, imgs_period = imgs #imgs:[B,2,T,H,W]
-
-        #imgs_period = imgs_period[:,:,self.args.his_len:]
-
+        imgs, imgs_mark = imgs
+        B1,B2,C1,T,H,W = imgs.shape
+        imgs = imgs.reshape(B1*B2, 2, T, H, W)
+        B1,B2,T,C2 = imgs_mark.shape
+        imgs_mark = imgs_mark.reshape(B1*B2, T, 5)
         T, H, W = imgs.shape[2:]
-        latent, mask, ids_restore, input_size, TimeEmb, FeatEmb = self.forward_encoder(imgs, imgs_mark, imgs_period, mask_ratio, mask_strategy, seed=seed, data=data, mode=mode)
+        import ipdb
+        ipdb.set_trace()
+        latent, mask, ids_restore, input_size, TimeEmb = self.forward_encoder(imgs, imgs_mark, mask_ratio, mask_strategy, seed=seed, data=data, mode=mode)
 
-        pred = self.forward_decoder(latent,  imgs_period,  imgs[:,:,:self.args.his_len].squeeze(dim=1).clone(), ids_restore, mask_strategy, TimeEmb, FeatEmb, input_size = input_size, data=data)  # [N, L, p*p*1]
+        pred = self.forward_decoder(latent,  None,  imgs[:,:,:self.args.his_len].squeeze(dim=1).clone(), ids_restore, mask_strategy, TimeEmb, input_size = input_size, data=data)  # [N, L, p*p*1]
         L = pred.shape[1]
 
         # predictor projection

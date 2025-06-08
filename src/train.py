@@ -72,14 +72,14 @@ class TrainLoop:
                 target_inv_ch2 = scaler2.inverse_transform(target_mask_ch2)
                 target_list.append(target_inv_ch1)
                 target_list.append(target_inv_ch2)
-                # #筛选大于 0.001 的样本
-                # mask_1 = (target_inv_ch1 > 0.001).flatten()
-                # pred_inv_ch1 = pred_inv_ch1[mask_1]
-                # target_inv_ch1 = target_inv_ch1[mask_1]
+                #筛选大于 0.001 的样本
+                mask_1 = (target_inv_ch1 > 0.001).flatten()
+                pred_inv_ch1 = pred_inv_ch1[mask_1]
+                target_inv_ch1 = target_inv_ch1[mask_1]
 
-                # mask_2 = (target_inv_ch2 > 0.001).flatten()
-                # pred_inv_ch2 = pred_inv_ch2[mask_2]
-                # target_inv_ch2 = target_inv_ch2[mask_2]
+                mask_2 = (target_inv_ch2 > 0.001).flatten()
+                pred_inv_ch2 = pred_inv_ch2[mask_2]
+                target_inv_ch2 = target_inv_ch2[mask_2]
 
 
                 
@@ -97,9 +97,6 @@ class TrainLoop:
         mae_ch1 = error_mae_ch1 / num
         mae_ch2 = error_mae_ch2 / num
         loss_test = error_norm / num
-        if Type == 'test':
-            import ipdb
-            ipdb.set_trace()
         return (rmse_ch1, rmse_ch2), (mae_ch1, mae_ch2), loss_test
 
 
