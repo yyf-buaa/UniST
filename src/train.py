@@ -5,7 +5,7 @@ import numpy as np
 from sklearn.metrics import mean_squared_error,mean_absolute_error
 import math
 import time
-
+from tqdm import tqdm
 
 class TrainLoop:
     def __init__(self, args, writer, model, data, test_data, val_data, device, early_stop = 5):
@@ -42,9 +42,9 @@ class TrainLoop:
     def Sample(self, test_data, step, mask_ratio, mask_strategy, seed=None, dataset='', index=0, Type='val'):
         target_list = []
         with torch.no_grad():
-            error_ch1, error_ch2, error_mae_ch1, error_mae_ch2, error_norm, num = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            error_ch1, error_ch2, error_mae_ch1, error_mae_ch2, error_norm, num, num_1, num_2 = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
 
-            for _, batch in enumerate(test_data[index]):
+            for _, batch in tqdm(enumerate(test_data[index])):
                 
                 loss, _, pred, target, mask = self.model_forward(batch, self.model, mask_ratio, mask_strategy, seed=seed, data = dataset, mode='forward')
 
@@ -81,21 +81,23 @@ class TrainLoop:
                 pred_inv_ch2 = pred_inv_ch2[mask_2]
                 target_inv_ch2 = target_inv_ch2[mask_2]
 
+                if len(pred_inv_ch1) == 0 or len(pred_inv_ch2) == 0:
+                    continue
 
-                
-                error_ch1 += mean_squared_error(target_inv_ch1, pred_inv_ch1, squared=True) * mask.sum().item()
-                error_mae_ch1 += mean_absolute_error(target_inv_ch1, pred_inv_ch1) * mask.sum().item()
-
-                error_ch2 += mean_squared_error(target_inv_ch2, pred_inv_ch2, squared=True) * mask.sum().item()
-                error_mae_ch2 += mean_absolute_error(target_inv_ch2, pred_inv_ch2) * mask.sum().item()
+                error_ch1 += mean_squared_error(target_inv_ch1, pred_inv_ch1, squared=True) * mask_1.sum().item()
+                error_mae_ch1 += mean_absolute_error(target_inv_ch1, pred_inv_ch1) * mask_1.sum().item()
+                error_ch2 += mean_squared_error(target_inv_ch2, pred_inv_ch2, squared=True) * mask_1.sum().item()
+                error_mae_ch2 += mean_absolute_error(target_inv_ch2, pred_inv_ch2) * mask_2.sum().item()
 
                 error_norm += loss.item() * mask.sum().item()
                 num += mask.sum().item()
+                num_1 += mask_1.sum().item()
+                num_2 += mask_2.sum().item()
 
-        rmse_ch1 = np.sqrt(error_ch1 / num)
-        rmse_ch2 = np.sqrt(error_ch2 / num)
-        mae_ch1 = error_mae_ch1 / num
-        mae_ch2 = error_mae_ch2 / num
+        rmse_ch1 = np.sqrt(error_ch1 / num_1)
+        rmse_ch2 = np.sqrt(error_ch2 / num_2)
+        mae_ch1 = error_mae_ch1 / num_1
+        mae_ch2 = error_mae_ch2 / num_2
         loss_test = error_norm / num
         return (rmse_ch1, rmse_ch2), (mae_ch1, mae_ch2), loss_test
 
@@ -104,7 +106,7 @@ class TrainLoop:
         old_mask_strategy_random = self.args.mask_strategy_random
         old_mask_strategy = self.args.mask_strategy
         old_mask_ratio = self.args.mask_ratio
-        if Type == 'test':
+        if Type == 'test' or Type == 'val':
             self.args.mask_strategy_random = 'none'
             self.args.mask_strategy = 'temporal'
             self.args.mask_ratio = (self.args.pred_len+0.0) / (self.args.pred_len+self.args.his_len)
@@ -156,7 +158,7 @@ class TrainLoop:
                     self.writer.add_scalar('Test_MAE/Stage-MAE-{}-{}-{}-{}-brightness'.format(self.args.stage, dataset_name.split('_C')[0], s, m), mae[1], epoch)
         
         loss_test = np.mean(loss_list)
-        if Type == 'test':
+        if Type == 'test' or Type == 'val':
             self.args.mask_strategy_random = old_mask_strategy_random 
             self.args.mask_strategy = old_mask_strategy
             self.args.mask_ratio = old_mask_ratio
@@ -222,7 +224,7 @@ class TrainLoop:
             
             loss_all, num_all, loss_real_all, num_all2 = 0.0, 0.0,0.0, 0.0
             start = time.time()
-            for name, batch in self.data:
+            for name, batch in tqdm(self.data):
                 mask_strategy, mask_ratio = self.mask_select()
                 loss, num, loss_real, num2  = self.run_step(batch, step, mask_ratio=mask_ratio, mask_strategy = mask_strategy,index=0, name = name)
                 step += 1

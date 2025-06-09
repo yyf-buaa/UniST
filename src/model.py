@@ -171,9 +171,9 @@ def UniST_model(args, **kwargs):
     elif args.size == 'large':
         model = UniST(
             embed_dim=384,
-            depth=6,
+            depth=12,
             decoder_embed_dim = 384,
-            decoder_depth=6,
+            decoder_depth=12,
             num_heads=8,
             decoder_num_heads=8,
             mlp_ratio=2,
@@ -714,37 +714,46 @@ class UniST(nn.Module):
         """
         target = self.patchify(imgs)
         assert pred.shape == target.shape, f"Shape mismatch: {pred.shape} vs {target.shape}"
-
-        # MSE Loss per channel
+            # Step 1: MSE Loss per channel
         loss = (pred - target) ** 2  # shape: [N, L, pCpHpW]
 
-        # Step 1: 提取被遮蔽区域
-        mask_expanded = mask.unsqueeze(-1).expand_as(loss)  # 扩展为 [N, L, pCpHpW] 方便索引
-        masked_loss = loss[mask_expanded.bool()]             # 只保留被遮蔽的 loss 值
-        masked_target = target[mask_expanded.bool()]         # 只保留被遮蔽的 target 值
+        # Step 2: 提取被遮蔽区域
+        mask_expanded = mask.unsqueeze(-1).expand_as(loss)  # [N, L, pCpHpW]
+        masked_loss = loss[mask_expanded.bool()]            # [M], M 是被遮蔽区域的总元素数
+        masked_target = target[mask_expanded.bool()]        # [M]
 
-        # Step 2: 构建 valid/invalid mask（只在被遮蔽区域内）
-        valid_mask_in_masked = (masked_target > -1)          # shape: [M], M 是被遮蔽位置的总元素数
-        invalid_mask_in_masked = ~valid_mask_in_masked
+        # Step 3: 只保留 valid 的部分（target > -1）
+        valid_mask = (masked_target > -1)
+        valid_loss = masked_loss[valid_mask]                # 只保留 valid 的 loss 值
 
-        # Step 3: 统计数量
-        valid_count = valid_mask_in_masked.sum().float()
-        invalid_count = invalid_mask_in_masked.sum().float()
-
-        total_count = (valid_count + invalid_count).clamp(min=1e-8)
-
-        # Step 4: 动态权重（反比于样本数量）
-        weight_valid = (invalid_count / total_count).item() if total_count > 0 else 0.5
-        weight_invalid = (valid_count / total_count).item() if total_count > 0 else 0.5
-
-        # Step 5: 加权 loss
-        loss_valid = (masked_loss[valid_mask_in_masked]).sum() * weight_valid
-        loss_invalid = (masked_loss[invalid_mask_in_masked]).sum() * weight_invalid
-
-        # Step 6: 总 loss
-        total_loss = (loss_valid + loss_invalid) / total_count
+        # Step 4: 计算平均 loss
+        total_loss = valid_loss.mean() 
 
         return total_loss, target
+
+        # # MSE Loss per channel
+        # loss = (pred - target) ** 2  # shape: [N, L, pCpHpW]
+
+        # # Step 1: 提取被遮蔽区域
+        # mask_expanded = mask.unsqueeze(-1).expand_as(loss)  # 扩展为 [N, L, pCpHpW] 方便索引
+        # masked_loss = loss[mask_expanded.bool()]             # 只保留被遮蔽的 loss 值
+        # masked_target = target[mask_expanded.bool()]         # 只保留被遮蔽的 target 值
+
+        # # Step 2: 构建 valid/invalid mask（只在被遮蔽区域内）
+        # valid_mask_in_masked = (masked_target > -1)          # shape: [M], M 是被遮蔽位置的总元素数
+        # invalid_mask_in_masked = ~valid_mask_in_masked
+
+        # # Step 4: 动态权重（反比于样本数量）
+        # weight_valid = 62.1108  # 这里的权重可以根据实际情况调整
+
+        # # Step 5: 加权 loss
+        # loss_valid = (masked_loss[valid_mask_in_masked]).sum() * weight_valid
+        # loss_invalid = (masked_loss[invalid_mask_in_masked]).sum()
+
+        # # Step 6: 总 loss
+        # total_loss = (loss_valid + loss_invalid) / (valid_mask_in_masked.sum() + invalid_mask_in_masked.sum())
+
+        # return total_loss, target
 
 
     def forward(self, imgs, mask_ratio=0.5, mask_strategy='random',seed=None, data='none', mode='backward'):
@@ -754,8 +763,6 @@ class UniST(nn.Module):
         B1,B2,T,C2 = imgs_mark.shape
         imgs_mark = imgs_mark.reshape(B1*B2, T, 5)
         T, H, W = imgs.shape[2:]
-        import ipdb
-        ipdb.set_trace()
         latent, mask, ids_restore, input_size, TimeEmb = self.forward_encoder(imgs, imgs_mark, mask_ratio, mask_strategy, seed=seed, data=data, mode=mode)
 
         pred = self.forward_decoder(latent,  None,  imgs[:,:,:self.args.his_len].squeeze(dim=1).clone(), ids_restore, mask_strategy, TimeEmb, input_size = input_size, data=data)  # [N, L, p*p*1]
@@ -763,6 +770,6 @@ class UniST(nn.Module):
 
         # predictor projection
         pred = self.decoder_pred(pred)
-        loss1, loss2, target = self.forward_loss(imgs, pred, mask)
+        loss1, target = self.forward_loss(imgs, pred, mask)
         
-        return loss1, loss2, pred, target, mask
+        return loss1, 0, pred, target, mask

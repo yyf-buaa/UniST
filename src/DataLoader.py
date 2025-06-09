@@ -234,8 +234,8 @@ def data_load_single(args, dataset):
     test_dataset = Dataset_test(test_data, my_scaler_channel_0, my_scaler_channel_1)
     val_dataaset = test_dataset
     data = DataLoader(train_dataset, num_workers=8, batch_size=args.batch_size, shuffle=True) 
-    test_data = DataLoader(test_dataset , num_workers=8, batch_size = 1, shuffle=False)
-    val_data = DataLoader(val_dataaset, num_workers=8, batch_size = 1, shuffle=False)
+    test_data = DataLoader(test_dataset , num_workers=8, batch_size = args.batch_size, shuffle=False)
+    val_data = DataLoader(val_dataaset, num_workers=8, batch_size = args.batch_size, shuffle=False)
     my_scaler=[my_scaler_channel_0,my_scaler_channel_1]
     return  data, test_data, val_data, my_scaler
 
