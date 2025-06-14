@@ -378,6 +378,7 @@ class UniST(nn.Module):
             ]
         )
 
+
         self.decoder_norm = norm_layer(decoder_embed_dim)
 
         self.decoder_pred = nn.Sequential(*[
@@ -467,8 +468,6 @@ class UniST(nn.Module):
         imgs: (N, 2, T, H, W)
         x: (N, L, patch_size**2 *2)
         """
-        import ipdb
-        ipdb.set_trace()
         N, _, T, H, W = imgs.shape
         p = self.args.patch_size
         u = self.args.t_patch_size
@@ -715,46 +714,44 @@ class UniST(nn.Module):
         mask: [N, L], 1 表示被遮蔽的 patch
         """
         target = self.patchify(imgs)
-        # assert pred.shape == target.shape, f"Shape mismatch: {pred.shape} vs {target.shape}"
-        #     # Step 1: MSE Loss per channel
-        # loss = (pred - target) ** 2  # shape: [N, L, pCpHpW]
-
-        # # Step 2: 提取被遮蔽区域
-        # mask_expanded = mask.unsqueeze(-1).expand_as(loss)  # [N, L, pCpHpW]
-        # masked_loss = loss[mask_expanded.bool()]            # [M], M 是被遮蔽区域的总元素数
-        # masked_target = target[mask_expanded.bool()]        # [M]
-
-        # # Step 3: 只保留 valid 的部分（target > -1）
-        # valid_mask = (masked_target > -1)
-        # valid_loss = masked_loss[valid_mask]                # 只保留 valid 的 loss 值
-        # import ipdb
-        # ipdb.set_trace()
-        # # Step 4: 计算平均 loss
-        # total_loss = valid_loss.mean() 
-
-        # return total_loss, target
-
-        # MSE Loss per channel
+        assert pred.shape == target.shape, f"Shape mismatch: {pred.shape} vs {target.shape}"
+        # Step 1: MSE Loss per channel
         loss = (pred - target) ** 2  # shape: [N, L, pCpHpW]
 
-        # Step 1: 提取被遮蔽区域
-        mask_expanded = mask.unsqueeze(-1).expand_as(loss)  # 扩展为 [N, L, pCpHpW] 方便索引
-        masked_loss = loss[mask_expanded.bool()]             # 只保留被遮蔽的 loss 值
-        masked_target = target[mask_expanded.bool()]         # 只保留被遮蔽的 target 值
+        # Step 2: 提取被遮蔽区域
+        mask_expanded = mask.unsqueeze(-1).expand_as(loss)  # [N, L, pCpHpW]
+        masked_loss = loss[mask_expanded.bool()]            # [M], M 是被遮蔽区域的总元素数
+        masked_target = target[mask_expanded.bool()]        # [M]
 
-        # Step 2: 构建 valid/invalid mask（只在被遮蔽区域内）
-        valid_mask_in_masked = (masked_target > -1)          # shape: [M], M 是被遮蔽位置的总元素数
-        invalid_mask_in_masked = ~valid_mask_in_masked
+        # Step 3: 只保留 valid 的部分（target > -1）
+        valid_mask = (masked_target > -1)
+        valid_loss = masked_loss[valid_mask]                # 只保留 valid 的 loss 值
+        # Step 4: 计算平均 loss
+        total_loss = valid_loss.mean() 
 
-        # Step 4: 动态权重（反比于样本数量）
-        weight_valid = 62.1108  # 这里的权重可以根据实际情况调整
+        return total_loss, target
 
-        # Step 5: 加权 loss
-        loss_valid = (masked_loss[valid_mask_in_masked]).sum() * weight_valid
-        loss_invalid = (masked_loss[invalid_mask_in_masked]).sum()
+        # MSE Loss per channel
+        # loss = (pred - target) ** 2  # shape: [N, L, pCpHpW]
 
-        # Step 6: 总 loss
-        total_loss = (loss_valid + loss_invalid) / (valid_mask_in_masked.sum() + invalid_mask_in_masked.sum())
+        # # Step 1: 提取被遮蔽区域
+        # mask_expanded = mask.unsqueeze(-1).expand_as(loss)  # 扩展为 [N, L, pCpHpW] 方便索引
+        # masked_loss = loss[mask_expanded.bool()]             # 只保留被遮蔽的 loss 值
+        # masked_target = target[mask_expanded.bool()]         # 只保留被遮蔽的 target 值
+
+        # # Step 2: 构建 valid/invalid mask（只在被遮蔽区域内）
+        # valid_mask_in_masked = (masked_target > -1)          # shape: [M], M 是被遮蔽位置的总元素数
+        # invalid_mask_in_masked = ~valid_mask_in_masked
+
+        # # Step 4: 动态权重（反比于样本数量）
+        # weight_valid = 62.1108  # 这里的权重可以根据实际情况调整
+
+        # # Step 5: 加权 loss
+        # loss_valid = (masked_loss[valid_mask_in_masked]).sum() * weight_valid
+        # loss_invalid = (masked_loss[invalid_mask_in_masked]).sum()
+
+        # # Step 6: 总 loss
+        # total_loss = (loss_valid + loss_invalid) / (valid_mask_in_masked.sum() + invalid_mask_in_masked.sum())
 
         return total_loss, target
 

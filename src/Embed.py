@@ -7,24 +7,74 @@ import numpy as np
 
 
 
+import torch
+import torch.nn as nn
+
 class TokenEmbedding(nn.Module):
     def __init__(self, c_in, d_model, t_patch_size, patch_size):
-        super(TokenEmbedding, self).__init__()
-        kernel_size = [t_patch_size,patch_size, patch_size]
-        self.tokenConv = nn.Conv3d(in_channels=c_in, out_channels=d_model,
-                                   kernel_size=kernel_size, stride=kernel_size)
+        super().__init__()
+        self.t_patch_size = t_patch_size
+        self.patch_size = patch_size
+        kernel_size = [t_patch_size, patch_size, patch_size]
+        self.tokenConv = nn.Conv3d(
+            in_channels=c_in, 
+            out_channels=d_model,
+            kernel_size=kernel_size,
+            stride=kernel_size
+        )
+        
+        # 初始化权重
         for m in self.modules():
             if isinstance(m, nn.Conv3d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='leaky_relu')
+                nn.init.kaiming_normal_(
+                    m.weight, 
+                    mode='fan_in', 
+                    nonlinearity='leaky_relu'
+                )
+        
+        # 可学习的无效 token 嵌入
+        self.invalid_token = nn.Parameter(torch.zeros(1, 1, d_model))
+        nn.init.normal_(self.invalid_token, std=0.02)  # 用小的标准差初始化
 
     def forward(self, x):
-        # B, C, T, H, W = x.shape
-        x = self.tokenConv(x)
-        x = x.flatten(3)
-        x = torch.einsum("ncts->ntsc", x)  # [N, T, H*W, C]
-        x = x.reshape(x.shape[0], -1, x.shape[-1])  # [N, T*C*H*W, C]
+        # 保存原始输入用于检测全-1的 patch
+        original_input = x  # [B, C, T, H, W]
+        
+        # 进行卷积嵌入
+        x = self.tokenConv(x)  # [N, d_model, T', H', W']
+        x = x.flatten(3)       # [N, d_model, T', H'*W']
+        x = torch.einsum("ncts->ntsc", x)  # [N, T', H'*W', d_model]
+        x = x.reshape(x.shape[0], -1, x.shape[-1])  # [N, seq_len, d_model]
+        
+        # 生成掩码：检测原始输入中每个 patch 是否全为 -1
+        mask = self._detect_all_neg_one_patches(original_input)  # [N, seq_len]
+        # 将全-1的 patch 替换为可学习的无效 token
+        invalid_tokens = self.invalid_token.expand(1, mask.sum(), -1).squeeze()
+        x[mask] = invalid_tokens
+        
+        return x  # 返回嵌入向量和掩码（可选）
+
+    def patchify(self, imgs):
+        """
+        imgs: (N, 2, T, H, W)
+        x: (N, L, patch_size**2 *2)
+        """
+        N, _, T, H, W = imgs.shape
+        p = self.patch_size
+        u = self.t_patch_size
+        assert H % p == 0 and W % p == 0 and T % u == 0
+        h = H // p
+        w = W // p
+        t = T // u
+        x = imgs.reshape(shape=(N, 2, t, u, h, p, w, p))
+        x = torch.einsum("nctuhpwq->nthwupqc", x)
+        x = x.reshape(shape=(N, t * h * w, u * p**2 * 2))
+        self.patch_info = (N, T, H, W, p, u, t, h, w)
         return x
-    
+
+    def _detect_all_neg_one_patches(self, x):
+        patches = self.patchify(x)  # [N, seq_len, patch_size**2 * C]
+        return (patches == -1).all(dim=-1)  # [N, seq_len]
 
 class SpatialPatchEmb(nn.Module):
     def __init__(self, c_in, d_model, patch_size):
