@@ -50,7 +50,7 @@ class TrainLoop:
             target_fire_num = 0
             for _, batch in tqdm(enumerate(test_data[index])):
                 
-                loss, _, pred, target, mask = self.model_forward(batch, self.model, mask_ratio, mask_strategy, seed=seed, data = dataset, mode='forward')
+                loss, _, pred, target, mask, batch_num = self.model_forward(batch, self.model, mask_ratio, mask_strategy, seed=seed, data = dataset, mode='forward')
 
                 pred = torch.clamp(pred, min=-1, max=1)
                 pred_ch1 = pred[..., ::2] 
@@ -97,11 +97,11 @@ class TrainLoop:
 
                 error_ch1 += mean_squared_error(target_inv_ch1, pred_inv_ch1, squared=True) * mask_1.sum().item()
                 error_mae_ch1 += mean_absolute_error(target_inv_ch1, pred_inv_ch1) * mask_1.sum().item()
-                error_ch2 += mean_squared_error(target_inv_ch2, pred_inv_ch2, squared=True) * mask_1.sum().item()
+                error_ch2 += mean_squared_error(target_inv_ch2, pred_inv_ch2, squared=True) * mask_2.sum().item()
                 error_mae_ch2 += mean_absolute_error(target_inv_ch2, pred_inv_ch2) * mask_2.sum().item()
 
-                error_norm += loss.item() * mask.sum().item()
-                num += mask.sum().item()
+                error_norm += loss.item() * batch_num
+                num += batch_num
                 num_1 += mask_1.sum().item()
                 num_2 += mask_2.sum().item()
 
@@ -232,7 +232,7 @@ class TrainLoop:
             self.Evaluation(self.val_data, 0, best=True, Type='val')
             exit()
         
-        #self.Evaluation(self.val_data, 0, best=True, Type='val')
+        self.Evaluation(self.val_data, 0, best=True, Type='val')
         
         for epoch in range(self.args.total_epoches):
             print('Training')
@@ -244,6 +244,8 @@ class TrainLoop:
             for name, batch in tqdm(self.data):
                 mask_strategy, mask_ratio = self.mask_select()
                 loss, num, loss_real, num2  = self.run_step(batch, step, mask_ratio=mask_ratio, mask_strategy = mask_strategy,index=0, name = name)
+                if num == 0:
+                    continue
                 step += 1
                 loss_all += loss * num
                 #loss_real_all += loss_real * num
@@ -274,7 +276,7 @@ class TrainLoop:
 
         batch = [i.to(self.device) for i in batch]
 
-        loss, loss2, pred, target, mask = self.model(
+        loss, loss2, pred, target, mask, num = self.model(
                 batch,
                 mask_ratio=mask_ratio,
                 mask_strategy = mask_strategy, 
@@ -282,20 +284,20 @@ class TrainLoop:
                 data = data,
                 mode = mode, 
             )
-        return loss, loss2, pred, target, mask 
+        return loss, loss2, pred, target, mask, num 
 
     def forward_backward(self, batch, step, mask_ratio, mask_strategy,index, name=None):
 
-        loss, _, pred, target, mask = self.model_forward(batch, self.model, mask_ratio, mask_strategy, data=name, mode='backward')
+        loss, _, pred, target, mask, num  = self.model_forward(batch, self.model, mask_ratio, mask_strategy, data=name, mode='backward')
 
         pred_mask = pred.squeeze(dim=2)[mask==1]
         target_mask = target.squeeze(dim=2)[mask==1]
         #loss_real = mean_squared_error(self.args.scaler[name].inverse_transform(pred_mask.reshape(-1,1).detach().cpu().numpy()), self.args.scaler[name].inverse_transform(target_mask.reshape(-1,1).detach().cpu().numpy()), squared=True)
-    
-        loss.backward()
+        if not torch.isnan(loss).any():
+            loss.backward()
 
         self.writer.add_scalar('Training/Loss_step', loss, step)
-        return loss.item(), mask.sum().item(), None, (1-mask).sum().item()
+        return loss.item(), num, None, (1-mask).sum().item()
 
     def _anneal_lr(self):
         if self.step < self.warmup_steps:

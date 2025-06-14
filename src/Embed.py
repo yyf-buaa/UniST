@@ -52,7 +52,7 @@ class TokenEmbedding(nn.Module):
         invalid_tokens = self.invalid_token.expand(1, mask.sum(), -1).squeeze()
         x[mask] = invalid_tokens
         
-        return x  # 返回嵌入向量和掩码（可选）
+        return x, mask  # 返回嵌入向量和掩码（可选）
 
     def patchify(self, imgs):
         """
@@ -142,7 +142,7 @@ class DataEmbedding(nn.Module):
         x_mark: N, T, D
         '''
         N, T, C, H, W = x.shape
-        TokenEmb = self.value_embedding(x)
+        TokenEmb, mask = self.value_embedding(x)
         #FeatEmb = self.feat_embedding(x_feat)
         TimeEmb = self.temporal_embedding(x_mark)
         assert TokenEmb.shape[1] == TimeEmb.shape[1] * H // self.args.patch_size * W // self.args.patch_size
@@ -152,7 +152,7 @@ class DataEmbedding(nn.Module):
             x = TokenEmb + TimeEmb
         else:
             x = TokenEmb
-        return self.dropout(x), TimeEmb
+        return self.dropout(x), TimeEmb, mask
 
 
 # --------------------------------------------------------

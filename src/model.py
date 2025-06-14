@@ -187,73 +187,8 @@
 #         )
 #         return model
 
-# # class Attention(nn.Module):
-# #     def __init__(
-# #         self,
-# #         dim,
-# #         num_heads=8,
-# #         qkv_bias=False,
-# #         qk_scale=None,
-# #         attn_drop=0.0,
-# #         proj_drop=0.0,
-# #         input_size=(4, 14, 14),
-# #     ):
-# #         super().__init__()
-# #         assert dim % num_heads == 0, "dim should be divisible by num_heads"
-# #         self.num_heads = num_heads
-# #         head_dim = dim // num_heads
-# #         self.scale = qk_scale or head_dim**-0.5
-
-# #         self.q = nn.Linear(dim, dim, bias=qkv_bias)
-# #         self.k = nn.Linear(dim, dim, bias=qkv_bias)
-# #         self.v = nn.Linear(dim, dim, bias=qkv_bias)
-
-# #         assert attn_drop == 0.0  # do not use
-# #         self.proj = nn.Linear(dim, dim, bias=qkv_bias)
-# #         self.proj_drop = nn.Dropout(proj_drop)
-# #         self.input_size = input_size
-# #         assert input_size[1] == input_size[2]
-
-# #     def forward(self, x, attn_mask=None):
-# #         B, N, C = x.shape
-# #         q = (
-# #             self.q(x)
-# #             .reshape(B, N, self.num_heads, C // self.num_heads)
-# #             .permute(0, 2, 1, 3)
-# #         )
-# #         k = (
-# #             self.k(x)
-# #             .reshape(B, N, self.num_heads, C // self.num_heads)
-# #             .permute(0, 2, 1, 3)
-# #         )
-# #         v = (
-# #             self.v(x)
-# #             .reshape(B, N, self.num_heads, C // self.num_heads)
-# #             .permute(0, 2, 1, 3)
-# #         )
-
-# #         attn = (q @ k.transpose(-2, -1)) * self.scale
-
-# #         # 应用注意力掩码（如果提供）
-# #         if attn_mask is not None:
-# #             # 确保掩码是布尔类型，并扩展到正确的维度
-# #             # attn_mask 形状应为 [B, N]，其中 True 表示要忽略的位置
-# #             if attn_mask.dtype != torch.bool:
-# #                 attn_mask = attn_mask.bool()
-# #             # 扩展掩码以匹配注意力矩阵的维度 [B, num_heads, N, N]
-# #             attn_mask_expanded = attn_mask.unsqueeze(1).unsqueeze(2)
-# #             # 将需要忽略的位置设为负无穷，softmax后将变为0
-# #             attn = attn.masked_fill(attn_mask_expanded, float('-inf'))
-# #         attn = attn.softmax(dim=-1)
-# #         mask = torch.isnan(attn)
-# #         attn = attn.masked_fill(mask, 0.0)
-# #         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
-# #         x = self.proj(x)
-# #         x = self.proj_drop(x)
-# #         x = x.view(B, -1, C)
-# #         return x
-
 # class Attention(nn.Module):
+    
 #     def __init__(
 #         self,
 #         dim,
@@ -275,12 +210,49 @@
 #         self.v = nn.Linear(dim, dim, bias=qkv_bias)
 
 #         assert attn_drop == 0.0  # do not use
-#         self.proj = nn.Linear(dim, dim, bias= qkv_bias)
+#         self.proj = nn.Linear(dim, dim, bias=qkv_bias)
 #         self.proj_drop = nn.Dropout(proj_drop)
 #         self.input_size = input_size
 #         assert input_size[1] == input_size[2]
+        
+#     def safe_softmax(self, x, dim=-1, mask=None, eps=1e-10):
+#         """
+#         安全的softmax实现，处理全掩码和数值溢出问题
+#         """
+#         # 应用掩码
+#         if mask is not None:
+#             x = x.masked_fill(mask, float('-inf'))
+        
+#         # 检测并处理全-inf的情况
+#         max_values = x.max(dim=dim, keepdim=True)[0]  # 计算每行最大值
+#         all_inf_mask = torch.isinf(max_values) & (max_values < 0)  # 全-inf的行
+        
+#         # 对全-inf的行，用一个大负数替代（避免0/0）
+#         safe_x = x.masked_fill(all_inf_mask, -10000.0)  # -10000足够小，使得exp后接近0
+        
+#         # 数值稳定性处理：减去最大值避免指数溢出
+#         safe_x = safe_x - safe_x.max(dim=dim, keepdim=True)[0]
+        
+#         # 计算softmax
+#         exp_x = torch.exp(safe_x)
+#         sum_exp = exp_x.sum(dim=dim, keepdim=True)
+        
+#         # 防止分母为0（处理全-inf的情况）
+#         softmax_output = exp_x / (sum_exp + eps * all_inf_mask.float())
+        
+#         # 对全-inf的行，设为均匀分布（可选）
+#         uniform_dist = torch.ones_like(softmax_output) / softmax_output.shape[dim]
+#         softmax_output = torch.where(all_inf_mask, uniform_dist, softmax_output)
+        
+#         # 调试：检查是否还有NaN
+#         if torch.isnan(softmax_output).any():
+#             print("警告：softmax输出仍包含NaN")
+#             print(f"输入范围: min={x.min()}, max={x.max()}")
+#             print(f"全-inf比例: {all_inf_mask.float().mean():.2%}")
+        
+#         return softmax_output
 
-#     def forward(self, x):
+#     def forward(self, x, attn_mask=None):
 #         B, N, C = x.shape
 #         q = (
 #             self.q(x)
@@ -300,14 +272,22 @@
 
 #         attn = (q @ k.transpose(-2, -1)) * self.scale
 
-#         attn = attn.softmax(dim=-1)
-
+#         # 应用注意力掩码（如果提供）
+#         if attn_mask is not None:
+#             # 确保掩码是布尔类型，并扩展到正确的维度
+#             # attn_mask 形状应为 [B, N]，其中 True 表示要忽略的位置
+#             if attn_mask.dtype != torch.bool:
+#                 attn_mask = attn_mask.bool()
+#             # 扩展掩码以匹配注意力矩阵的维度 [B, num_heads, N, N]
+#             attn_mask_expanded = attn_mask.unsqueeze(1).unsqueeze(2)
+#             # 将需要忽略的位置设为负无穷，softmax后将变为0
+#             attn = attn.masked_fill(attn_mask_expanded, float('-inf'))
+#         attn = self.safe_softmax(attn, dim=-1)
 #         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
 #         x = self.proj(x)
 #         x = self.proj_drop(x)
 #         x = x.view(B, -1, C)
 #         return x
-
 
 # class Block(nn.Module):
 #     """
@@ -348,8 +328,8 @@
 #             drop=drop,
 #         )
 
-#     def forward(self, x):
-#         x = x + self.drop_path(self.attn(self.norm1(x)))
+#     def forward(self, x, attn_mask=None):
+#         x = x + self.drop_path(self.attn(self.norm1(x), attn_mask=attn_mask))
 #         x = x + self.drop_path(self.mlp(self.norm2(x)))
 #         return x
 
@@ -706,9 +686,9 @@
 
 #         assert x.shape == pos_embed_sort.shape
 
-#         # x_attn = x + pos_embed_sort
-#         # unmasked_attn_mask = attn_mask[~mask.bool()]
-#         # unmasked_attn_mask = unmasked_attn_mask.reshape(mask.shape[0],-1)
+#         x_attn = x + pos_embed_sort
+#         unmasked_attn_mask = attn_mask[~mask.bool()]
+#         unmasked_attn_mask = unmasked_attn_mask.reshape(mask.shape[0],-1)
 #         # apply Transformer blocks
 #         for index, blk in enumerate(self.blocks):
 #             x_attn = blk(x_attn, attn_mask = unmasked_attn_mask)
@@ -781,7 +761,7 @@
 #         """
 #         target = self.patchify(imgs)
 #         assert pred.shape == target.shape, f"Shape mismatch: {pred.shape} vs {target.shape}"
-#         # Step 1: MSE Loss per channel
+#             # Step 1: MSE Loss per channel
 #         loss = (pred - target) ** 2  # shape: [N, L, pCpHpW]
 
 #         # Step 2: 提取被遮蔽区域
@@ -792,35 +772,10 @@
 #         # Step 3: 只保留 valid 的部分（target > -1）
 #         valid_mask = (masked_target > -1)
 #         valid_loss = masked_loss[valid_mask]                # 只保留 valid 的 loss 值
+
 #         # Step 4: 计算平均 loss
 #         total_loss = valid_loss.mean() 
-
-#         return total_loss, target
-
-#         # MSE Loss per channel
-#         # loss = (pred - target) ** 2  # shape: [N, L, pCpHpW]
-
-#         # # Step 1: 提取被遮蔽区域
-#         # mask_expanded = mask.unsqueeze(-1).expand_as(loss)  # 扩展为 [N, L, pCpHpW] 方便索引
-#         # masked_loss = loss[mask_expanded.bool()]             # 只保留被遮蔽的 loss 值
-#         # masked_target = target[mask_expanded.bool()]         # 只保留被遮蔽的 target 值
-
-#         # # Step 2: 构建 valid/invalid mask（只在被遮蔽区域内）
-#         # valid_mask_in_masked = (masked_target > -1)          # shape: [M], M 是被遮蔽位置的总元素数
-#         # invalid_mask_in_masked = ~valid_mask_in_masked
-
-#         # # Step 4: 动态权重（反比于样本数量）
-#         # weight_valid = 62.1108  # 这里的权重可以根据实际情况调整
-
-#         # # Step 5: 加权 loss
-#         # loss_valid = (masked_loss[valid_mask_in_masked]).sum() * weight_valid
-#         # loss_invalid = (masked_loss[invalid_mask_in_masked]).sum()
-
-#         # # Step 6: 总 loss
-#         # total_loss = (loss_valid + loss_invalid) / (valid_mask_in_masked.sum() + invalid_mask_in_masked.sum())
-
-#         return total_loss, target
-
+#         return total_loss, target, valid_loss.shape[0]
 
 #     def forward(self, imgs, mask_ratio=0.5, mask_strategy='random',seed=None, data='none', mode='backward'):
 #         imgs, imgs_mark = imgs
@@ -831,14 +786,14 @@
 #         T, H, W = imgs.shape[2:]
 #         latent, mask, ids_restore, input_size, TimeEmb, attn_mask = self.forward_encoder(imgs, imgs_mark, mask_ratio, mask_strategy, seed=seed, data=data, mode=mode)
 
-#         pred = self.forward_decoder(latent,  None,  imgs[:,:,:self.args.his_len].squeeze(dim=1).clone(), ids_restore, mask_strategy, TimeEmb, attn_mask = attn_mask, input_size = input_size, data=data)  # [N, L, p*p*1]
+#         pred = self.forward_decoder(latent,  None,  imgs[:,:,:self.args.his_len].squeeze(dim=1).clone(), ids_restore, mask_strategy, TimeEmb, attn_mask, input_size = input_size, data=data)  # [N, L, p*p*1]
 #         L = pred.shape[1]
 
 #         # predictor projection
 #         pred = self.decoder_pred(pred)
-#         loss1, target = self.forward_loss(imgs, pred, mask)
+#         loss1, target, num = self.forward_loss(imgs, pred, mask)
         
-#         return loss1, 0, pred, target, mask
+#         return loss1, 0, pred, target, mask, num
 from functools import partial
 
 import torch
@@ -1443,7 +1398,7 @@ class UniST(nn.Module):
         # if 'TDrive' in data or 'BikeNYC2' in data or 'DC' in data or 'Porto' in data or 'Ausin' in data:
         #     x, TimeEmb = self.Embedding_24(x, x_mark, is_time = True)
         # elif data is not None:
-        x, TimeEmb = self.Embedding(x, x_mark , is_time = True)
+        x, TimeEmb, mask = self.Embedding(x, x_mark , is_time = True)
         _, L, C = x.shape
 
         T = T // self.args.t_patch_size
@@ -1570,8 +1525,7 @@ class UniST(nn.Module):
 
         # Step 4: 计算平均 loss
         total_loss = valid_loss.mean() 
-
-        return total_loss, target
+        return total_loss, target, valid_loss.shape[0]
 
         # # MSE Loss per channel
         # loss = (pred - target) ** 2  # shape: [N, L, pCpHpW]
@@ -1611,6 +1565,6 @@ class UniST(nn.Module):
 
         # predictor projection
         pred = self.decoder_pred(pred)
-        loss1, target = self.forward_loss(imgs, pred, mask)
+        loss1, target, num = self.forward_loss(imgs, pred, mask)
         
-        return loss1, 0, pred, target, mask
+        return loss1, 0, pred, target, mask, num
