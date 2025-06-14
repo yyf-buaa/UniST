@@ -232,7 +232,7 @@ class TrainLoop:
             self.Evaluation(self.val_data, 0, best=True, Type='val')
             exit()
         
-        self.Evaluation(self.val_data, 0, best=True, Type='val')
+        #self.Evaluation(self.val_data, 0, best=True, Type='val')
         
         for epoch in range(self.args.total_epoches):
             print('Training')

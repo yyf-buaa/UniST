@@ -42,6 +42,10 @@ class Dataset_Train(Dataset):
         batch_data[...,1] = self.my_scaler_channel_1.transform(batch_data[...,1].reshape(-1,1)).reshape(batch_data[...,1].shape)
         batch_data = batch_data.permute(0, 4, 1, 2, 3)  # (B, C, 8, N, M)
         time_features = self.time_features[:aligned_T].unsqueeze(dim=0).reshape(-1, 8, 5)  # ( 8, 5)
+        mask = (batch_data == -1).all(dim=4).all(dim=3).all(dim=2).all(dim=1)   # 所有元素都为 -1 的样本
+        mask = ~mask  # 反选：筛除全为 -1 的样本
+        batch_data = batch_data[mask]
+        time_features = time_features[mask]
         return batch_data, time_features
     
 class Dataset_test(Dataset):
@@ -79,6 +83,10 @@ class Dataset_test(Dataset):
         batch_data = batch_data.permute(0, 4, 1, 2, 3)  # (B, C, 8, N, M)
         time_features = self.time_features[:aligned_T].unsqueeze(dim=0)
         time_features = sliding_window_ts(time_features,8) 
+        mask = (batch_data == -1).all(dim=4).all(dim=3).all(dim=2).all(dim=1)   # 所有元素都为 -1 的样本
+        mask = ~mask  # 反选：筛除全为 -1 的样本
+        batch_data = batch_data[mask]
+        time_features = time_features[mask]
         return batch_data, time_features
 
 class MinMaxNormalization(object):
