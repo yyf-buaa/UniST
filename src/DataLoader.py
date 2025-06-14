@@ -41,7 +41,7 @@ class Dataset_Train(Dataset):
         batch_data[...,0] = self.my_scaler_channel_0.transform(batch_data[...,0].reshape(-1,1)).reshape(batch_data[...,0].shape)
         batch_data[...,1] = self.my_scaler_channel_1.transform(batch_data[...,1].reshape(-1,1)).reshape(batch_data[...,1].shape)
         batch_data = batch_data.permute(0, 4, 1, 2, 3)  # (B, C, 8, N, M)
-        time_features = self.time_features[:aligned_T].unsqueeze(dim=0).reshape(-1, 8, 5)  # (B, 8, 5)
+        time_features = self.time_features[:aligned_T].unsqueeze(dim=0).reshape(-1, 8, 5)  # ( 8, 5)
         return batch_data, time_features
     
 class Dataset_test(Dataset):
@@ -222,13 +222,13 @@ def data_load_single(args, dataset):
     channel_0_values_train = get_nonzero_channel_values(train_data, 0)
     channel_0_values_test = get_nonzero_channel_values(test_data, 0)
     MAX_0 = max(channel_0_values_train.max().item(), channel_0_values_test.max().item())
-    MIN_0 = min(channel_0_values_train.min().item(), channel_0_values_test.min().item())
+    MIN_0 = 0
     my_scaler_channel_0.fit(np.array([MIN_0, MAX_0]))
     my_scaler_channel_1 = MinMaxNormalization()
     channel_1_values_train = get_nonzero_channel_values(train_data, 1)
     channel_1_values_test = get_nonzero_channel_values(test_data, 1)
     MAX_1 = max(channel_1_values_train.max().item(), channel_1_values_test.max().item())
-    MIN_1 = min(channel_1_values_train.min().item(), channel_1_values_test.min().item())
+    MIN_1 = 0
     my_scaler_channel_1.fit(np.array([MIN_1, MAX_1]))
     train_dataset = Dataset_Train(train_data, my_scaler_channel_0, my_scaler_channel_1)
     test_dataset = Dataset_test(test_data, my_scaler_channel_0, my_scaler_channel_1)

@@ -40,10 +40,14 @@ class TrainLoop:
         return loss, num, loss_real, num2
 
     def Sample(self, test_data, step, mask_ratio, mask_strategy, seed=None, dataset='', index=0, Type='val'):
-        target_list = []
+        target_1_list = []
+        target_2_list = []
+        pred_1_list = []
+        pred_2_list = []
         with torch.no_grad():
             error_ch1, error_ch2, error_mae_ch1, error_mae_ch2, error_norm, num, num_1, num_2 = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-
+            pred_fire_num = 0
+            target_fire_num = 0
             for _, batch in tqdm(enumerate(test_data[index])):
                 
                 loss, _, pred, target, mask = self.model_forward(batch, self.model, mask_ratio, mask_strategy, seed=seed, data = dataset, mode='forward')
@@ -70,17 +74,24 @@ class TrainLoop:
 
                 pred_inv_ch2 = scaler2.inverse_transform(pred_mask_ch2)
                 target_inv_ch2 = scaler2.inverse_transform(target_mask_ch2)
-                target_list.append(target_inv_ch1)
-                target_list.append(target_inv_ch2)
+
+                # target_list.append(target_inv_ch1)
+                # target_list.append(target_inv_ch2)
+                pred_1_list.append(pred_inv_ch1)
+                pred_2_list.append(pred_inv_ch2)
+                target_1_list.append(target_inv_ch1)
+                target_2_list.append(target_inv_ch2)
                 #筛选大于 0.001 的样本
-                mask_1 = (target_inv_ch1 > 0.001).flatten()
+                mask_1 = (target_inv_ch1 > 0.01).flatten()
                 pred_inv_ch1 = pred_inv_ch1[mask_1]
                 target_inv_ch1 = target_inv_ch1[mask_1]
 
-                mask_2 = (target_inv_ch2 > 0.001).flatten()
+                mask_2 = (target_inv_ch2 > 0.01).flatten()
                 pred_inv_ch2 = pred_inv_ch2[mask_2]
                 target_inv_ch2 = target_inv_ch2[mask_2]
 
+                pred_fire_num += (pred_inv_ch2 > 0.01).flatten().sum()
+                target_fire_num += (target_inv_ch2 > 0.01).flatten().sum()
                 if len(pred_inv_ch1) == 0 or len(pred_inv_ch2) == 0:
                     continue
 
@@ -99,7 +110,8 @@ class TrainLoop:
         mae_ch1 = error_mae_ch1 / num_1
         mae_ch2 = error_mae_ch2 / num_2
         loss_test = error_norm / num
-        return (rmse_ch1, rmse_ch2), (mae_ch1, mae_ch2), loss_test
+        print(f'pred_fire_num={pred_fire_num}, target_fire_num={target_fire_num}')
+        return (rmse_ch1, rmse_ch2), (mae_ch1, mae_ch2), loss_test, np.concatenate(pred_1_list, axis=0), np.concatenate(pred_2_list, axis=0), np.concatenate(target_1_list, axis=0), np.concatenate(target_2_list, axis=0)
 
 
     def Evaluation(self, test_data, epoch, seed=None, best=True, Type='val'):
@@ -114,7 +126,8 @@ class TrainLoop:
 
         rmse_list = []
         rmse_key_result = {}
-
+        target = []
+        pred = []
         for index, dataset_name in enumerate(self.args.dataset.split('*')):
 
             rmse_key_result[dataset_name] = {}
@@ -122,7 +135,7 @@ class TrainLoop:
             if self.args.mask_strategy_random != 'none':
                 for s in self.mask_list:
                     for m in self.mask_list[s]:
-                        result, mae, loss_test = self.Sample(test_data, epoch, mask_ratio=m, mask_strategy = s, seed=seed, dataset = dataset_name, index=index, Type=Type)
+                        result, mae, loss_test, pred_1, pred_2, target_1, target_2 = self.Sample(test_data, epoch, mask_ratio=m, mask_strategy = s, seed=seed, dataset = dataset_name, index=index, Type=Type)
                         rmse_list.append(result)
                         loss_list.append(loss_test)
                         if s not in rmse_key_result[dataset_name]:
@@ -141,7 +154,7 @@ class TrainLoop:
             else:
                 s = self.args.mask_strategy
                 m = self.args.mask_ratio
-                result, mae,  loss_test = self.Sample(test_data, epoch, mask_ratio=m, mask_strategy = s, seed=seed, dataset = dataset_name, index=index, Type=Type)
+                result, mae,  loss_test, pred_1, pred_2, target_1, target_2 = self.Sample(test_data, epoch, mask_ratio=m, mask_strategy = s, seed=seed, dataset = dataset_name, index=index, Type=Type)
                 rmse_list.append(result)
                 loss_list.append(loss_test)
                 if s not in rmse_key_result[dataset_name]:
@@ -163,17 +176,21 @@ class TrainLoop:
             self.args.mask_strategy = old_mask_strategy
             self.args.mask_ratio = old_mask_ratio
         if best:
-            is_break = self.best_model_save(epoch, loss_test, rmse_key_result)
+            is_break = self.best_model_save(epoch, loss_test, rmse_key_result, pred_1, pred_2, target_1, target_2)
             return is_break
 
         else:
             return loss_test, rmse_key_result
 
-    def best_model_save(self, step, rmse, rmse_key_result):
+    def best_model_save(self, step, rmse, rmse_key_result, pred_1, pred_2, target_1, target_2):
         if rmse < self.best_rmse:
             self.early_stop = 0
             torch.save(self.model.state_dict(), self.args.model_path+'model_save/model_best_stage_{}.pkl'.format(self.args.stage))
             torch.save(self.model.state_dict(), self.args.model_path+'model_save/model_best.pkl')
+            np.save(self.args.model_path+'model_save/pred_1.npy', pred_1)
+            np.save(self.args.model_path+'model_save/pred_2.npy', pred_2)
+            np.save(self.args.model_path+'model_save/target_1.npy',target_1)
+            np.save(self.args.model_path+'model_save/target_2.npy',target_2)
             self.best_rmse = rmse
             self.writer.add_scalar('Evaluation/RMSE_best', self.best_rmse, step)
             print('\nRMSE_best:{}\n'.format(self.best_rmse))
@@ -236,7 +253,7 @@ class TrainLoop:
             end = time.time()
             print('training time:{} min'.format(round((end-start)/60.0,2)))
             print('epoch:{}, training loss:{}'.format(epoch, loss_all / num_all))
-
+            self.writer.add_scalar('Training/Loss_epoch', loss_all / num_all, step)
             if epoch % self.log_interval == 0 and epoch > 0 or epoch == 10 or epoch == self.args.total_epoches-1:
                 print('Evaluation')
                 eval_result = self.Evaluation(self.val_data, epoch, best=True, Type='val')

@@ -13,7 +13,8 @@ from utils import *
 import torch as th
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
-
+import warnings
+warnings.filterwarnings("ignore")
 
 def setup_init(seed):
     random.seed(seed)
